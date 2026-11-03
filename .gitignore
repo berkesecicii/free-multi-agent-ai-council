@@ -1,0 +1,44 @@
+# --- secrets and credentials (never commit) ---
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.cer
+*.mobileprovision
+secrets*
+credentials*
+*token*.txt
+*apikey*
+
+# --- local app data, chats, logs and backups ---
+shared/
+attachments/
+_yedek/
+_github/
+Denemeler/
+_test-media/
+TAKIM/
+HANDOFF.md
+DURUM.md
+*.log
+*.jsonl
+.native-stamp
+state.json
+
+# --- build output ---
+JARVIS.app/
+JARVIS-Mac.zip
+work/
+build/
+dist/
+
+# --- Python / macOS / editors ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+._*
+.idea/
+.vscode/
