@@ -41,8 +41,8 @@ cat > "$OUTPUT_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.berke.jarvis</string>
 <key>CFBundleName</key><string>JARVIS</string>
 <key>CFBundleDisplayName</key><string>JARVIS</string>
-<key>CFBundleVersion</key><string>70</string>
-<key>CFBundleShortVersionString</key><string>0.7.0</string>
+<key>CFBundleVersion</key><string>74</string>
+<key>CFBundleShortVersionString</key><string>0.7.4</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>

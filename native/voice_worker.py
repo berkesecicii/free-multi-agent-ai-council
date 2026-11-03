@@ -12,5 +12,5 @@ tts=TextToSpeech(load_cfgs(models),load_text_processor(models),*load_onnx_all(mo
 profile='F1' if value.get('style')=='calm' else 'F3'
 style=load_voice_style([str(base/'voice_styles'/(profile+'.json'))])
 text=str(value['text'])[:1200]
-wav,duration=tts(text,'tr' if value.get('lang')=='tr' else 'en',style,5,0.97)
+wav,duration=tts(text,'tr' if value.get('lang')=='tr' else 'en',style,5,1.18)  # speed: 0.97 was too slow; 1.18 is brisk but clear
 sf.write(value['output'],wav[0,:int(tts.sample_rate*duration[0].item())],tts.sample_rate)

@@ -3,6 +3,42 @@ import json,os,re,subprocess,threading,time,urllib.request
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
+import re as _re
+_FLASH=_re.compile(r'^(gemini-3\.8-flash)-(low|medium|high)$')
+
+def escalate_model(model,available,planning=False,web_research=False):
+    """Cheapest thinking tier by default; one step up (medium) only for planning or live research
+    and only if the catalog offers it. Never goes to high automatically and never downgrades a user choice."""
+    m=_FLASH.match(model or '')
+    if m and m.group(2)=='low' and (planning or web_research):
+        candidate=m.group(1)+'-medium'
+        if candidate in available:return candidate
+    return model
+
+_THINK=('neden','nasıl','nasil','analiz','karşılaştır','karsilastir','planla','strateji','tasarla','mimari','değerlendir','degerlendir','öner','oner','why','explain','compare','analy','plan ','design','architect','review','debug','hata','optimi','karar')
+def coordinator_tier(text,planning=False,delegation=False):
+    """JARVIS thinking depth per message: high for planning, delegation or long briefs,
+    low for short small talk, medium for everything in between."""
+    t=(text or '').strip()
+    if planning or delegation or len(t)>280:return 'high'
+    if len(t)<=80 and '\n' not in t and not any(w in t.casefold() for w in _THINK):return 'low'
+    return 'medium'
+
+def with_tier(model,tier,available):
+    """Switch a gemini-3.8-flash-* model id to the wanted tier if the catalog offers it; otherwise the nearest lower one."""
+    m=_FLASH.match(model or '')
+    if not m:return model
+    order=['low','medium','high']
+    for t in order[:order.index(tier)+1][::-1]:
+        candidate=m.group(1)+'-'+t
+        if candidate in available:return candidate
+    return model
+
+def cheapest_flash(model):
+    """One-time cost migration helper: Flash medium/high saved settings fall back to low."""
+    m=_FLASH.match(model or '')
+    return m.group(1)+'-low' if m and m.group(2)!='low' else model
+
 DEFAULTS={'claude_code':'sonnet','codex':'','gemini':'gemini-3.8-flash-low','claude_google':'claude-sonnet-4-6','local':'gemma3:4b','openrouter':'openrouter/free','manual':''}
 
 def bundled_catalog():

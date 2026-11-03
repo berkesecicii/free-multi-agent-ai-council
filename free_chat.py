@@ -6,7 +6,8 @@ import urllib.request
 import urllib.error
 
 def key():
-    p=subprocess.run(['/usr/bin/security','find-generic-password','-s','BerkeJARVIS.OpenRouter','-a','api-key','-w'],capture_output=True,text=True,timeout=8)
+    try:p=subprocess.run(['/usr/bin/security','find-generic-password','-s','BerkeJARVIS.OpenRouter','-a','api-key','-w'],capture_output=True,text=True,timeout=8)
+    except (OSError,subprocess.SubprocessError):return ''  # locked keychain, timeout or non-macOS: treated as 'no key', never a crash
     return p.stdout.strip() if p.returncode==0 else ''
 
 def has_key():return bool(key())

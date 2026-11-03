@@ -20,7 +20,7 @@ func J(_ text:String)->String {
     return value
 }
 
-final class JarvisApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate, NSWindowDelegate {
+final class JarvisApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate, NSWindowDelegate {
     var window: NSWindow!
     var web: WKWebView!
     var backend: Process?
@@ -60,7 +60,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, 
         let controller=WKUserContentController()
         controller.add(self,name:"native")
         let config=WKWebViewConfiguration();config.userContentController=controller
-        web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self
+        web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;web.uiDelegate=self
         web.setValue(false,forKey:"drawsBackground")
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1400,height:940),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title=L(J("JARVIS — Berke’nin Çalışma Alanı"),"JARVIS — Berke’s Workspace");window.minSize=NSSize(width:1000,height:700);window.center();window.contentView=web;window.delegate=self
@@ -93,7 +93,7 @@ final class JarvisApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, 
         let selected=voices.contains(where:{$0["id"]==saved}) ? saved : ""
         emit("voices",["voices":voices,"selected":selected])
     }
-    @objc func about() { let alert=NSAlert();alert.messageText="JARVIS / MARK VI · 0.7.0";alert.informativeText=L("Berke için yerel Mac çalışma alanı. JARVIS sohbeti Gemini Flash ile, kod işleri seçilen geliştirici modeliyle çalışır. Codex ve Claude gündelik sohbet için otomatik çağrılmaz. Yerel sohbet ve yalnızca kadın sesleri seçilebilir. Aktif bilgisayar görevleri ChatGPT uygulamasına devredilebilir.","A local Mac workspace for Berke. JARVIS chat uses Gemini Flash; development uses the selected coding model. Everyday chat does not automatically call Codex or Claude. Local chat and female voices are available. Computer tasks can be handed off to the official ChatGPT app.");alert.runModal() }
+    @objc func about() { let alert=NSAlert();alert.messageText="JARVIS / MARK VI · 0.7.4";alert.informativeText=L("Berke için yerel Mac çalışma alanı. JARVIS sohbeti Gemini Flash ile, kod işleri seçilen geliştirici modeliyle çalışır. Codex ve Claude gündelik sohbet için otomatik çağrılmaz. Yerel sohbet ve yalnızca kadın sesleri seçilebilir. Aktif bilgisayar görevleri ChatGPT uygulamasına devredilebilir.","A local Mac workspace for Berke. JARVIS chat uses Gemini Flash; development uses the selected coding model. Everyday chat does not automatically call Codex or Claude. Local chat and female voices are available. Computer tasks can be handed off to the official ChatGPT app.");alert.runModal() }
     func alert(_ text: String) { let a=NSAlert();a.messageText="JARVIS";a.informativeText=text;a.runModal() }
     func startBackend(attempt:Int=0) {
         guard let resources=Bundle.main.resourceURL else {return}
@@ -202,6 +202,13 @@ final class JarvisApp: NSObject, NSApplicationDelegate, WKScriptMessageHandler, 
         case "ready": if !didGreet {didGreet=true;speak(L(J("Merhaba Berke. Buradayım. Bugün ne üzerinde çalışalım?"),"Hello, Berke. I am here. What shall we work on today?"));emitVoices()}
         default: break
         }
+    }
+    // Photo/video picker for the chat's attach button (WKWebView shows no file panel without this).
+    func webView(_ webView:WKWebView,runOpenPanelWith parameters:WKOpenPanelParameters,initiatedByFrame frame:WKFrameInfo,completionHandler:@escaping([URL]?)->Void) {
+        let panel=NSOpenPanel();panel.canChooseFiles=true;panel.canChooseDirectories=false;panel.allowsMultipleSelection=false
+        panel.allowedFileTypes=["jpg","jpeg","png","gif","webp","heic","heif","mp4","mov","m4v","webm"]
+        panel.message=L("Sohbete eklenecek fotoğraf veya videoyu seç","Choose a photo or video to attach")
+        panel.begin{response in completionHandler(response == .OK ? panel.urls : nil)}
     }
     func webView(_ webView:WKWebView,decidePolicyFor navigationAction:WKNavigationAction,decisionHandler:@escaping(WKNavigationActionPolicy)->Void) {
         if let url=navigationAction.request.url,url.host=="127.0.0.1",url.port==port {decisionHandler(.allow)} else {decisionHandler(.cancel)}

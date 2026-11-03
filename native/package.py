@@ -18,7 +18,7 @@ out=root/'JARVIS-Mac.zip'
 with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,compresslevel=5) as archive:
     for directory in (app,project):
         for path in sorted(directory.rglob('*')):
-            if '__pycache__' in path.parts or path.name=='.DS_Store' or path.name.startswith('._') or 'shared' in path.parts:continue
+            if '__pycache__' in path.parts or path.name=='.DS_Store' or path.name.startswith('._') or 'shared' in path.parts or '_yedek' in path.parts:continue
             name=str(path.relative_to(root))
             if path.is_symlink():
                 info=zipfile.ZipInfo(name,time.localtime(path.lstat().st_mtime)[:6])

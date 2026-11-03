@@ -67,6 +67,15 @@ function openTransferModal(task){
 }
 
 function spokenReply(text){
- const cleaned=text.replace(/```[\s\S]*?```/g,' Kod örneğini sohbete ekledim. ').replace(/https?:\/\/\S+/g,' bağlantı ').replace(/[#*_`]/g,'').trim();
- return cleaned.length>1100?cleaned.slice(0,1100)+' Devamı sohbette.':cleaned;
+ // Spoken replies are a short summary, never the whole text: first sentences up to ~200 characters; details stay in the chat.
+ const english=(text.match(/\b(the|and|you|with|this|that|is|are|can|will)\b/gi)||[]).length>(text.match(/[çğıöşüÇĞİÖŞÜ]|\b(bir|ve|için|ile|bu|değil|ama)\b/gi)||[]).length;
+ const hadCode=/```/.test(text);
+ const cleaned=text.replace(/```[\s\S]*?```/g,' ').replace(/\|[^\n]*\|/g,' ').replace(/https?:\/\/\S+/g,' ').replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm,'').replace(/[#*_`>~]/g,'').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,'').replace(/\s+/g,' ').trim();
+ const sentences=cleaned.match(/[^.!?…]+[.!?…]+|[^.!?…]+$/g)||[];
+ let spoken='';
+ for(const s of sentences){if(spoken&&(spoken+s).length>200)break;spoken+=s;if(spoken.length>=100)break;}
+ spoken=spoken.trim();
+ const more=cleaned.length>spoken.length+10||hadCode;
+ const tail=hadCode?(english?' I added the code to the chat.':' Kodu sohbete ekledim.'):more?(english?' Details are in the chat.':' Ayrıntılar sohbette.'):'';
+ return (spoken||(english?'Done.':'Hazır.')).slice(0,300)+tail;
 }

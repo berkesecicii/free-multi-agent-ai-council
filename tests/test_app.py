@@ -745,3 +745,574 @@ class InterruptedHandoffTests(unittest.TestCase):
                 self.assertIn('counter function',launch.call_args.args[0]);self.assertNotIn('CANARY',launch.call_args.args[0]);self.assertNotIn('Quota exhausted',launch.call_args.args[0]);self.assertEqual(launch.call_args.args[1],'VISION')
             item['status']='done'
             with self.assertRaises(ValueError):s.action('continue-with-agent',{'message_id':item['id'],'owner':'VISION'})
+
+class CostDefaultsTests(unittest.TestCase):
+    def test_escalation_helper_is_conservative(self):
+        from model_catalog import escalate_model,cheapest_flash
+        offered={'gemini-3.8-flash-low','gemini-3.8-flash-medium','gemini-3.8-flash-high'}
+        self.assertEqual(escalate_model('gemini-3.8-flash-low',offered,web_research=True),'gemini-3.8-flash-medium')
+        self.assertEqual(escalate_model('gemini-3.8-flash-low',offered),'gemini-3.8-flash-low')
+        self.assertEqual(escalate_model('gemini-3.8-flash-low',offered,planning=False,web_research=False),'gemini-3.8-flash-low')
+        self.assertEqual(escalate_model('gemini-3.8-flash-low',{'gemini-3.8-flash-low'},web_research=True),'gemini-3.8-flash-low')
+        self.assertEqual(escalate_model('gemini-3.8-flash-high',offered,web_research=True),'gemini-3.8-flash-high')
+        self.assertEqual(escalate_model('gpt-oss-120b-medium',offered,web_research=True),'gpt-oss-120b-medium')
+        self.assertEqual(escalate_model('',offered,web_research=True),'')
+        self.assertEqual(cheapest_flash('gemini-3.8-flash-high'),'gemini-3.8-flash-low')
+        self.assertEqual(cheapest_flash('gemini-3.8-flash-medium'),'gemini-3.8-flash-low')
+        self.assertEqual(cheapest_flash('claude-sonnet-4-6'),'claude-sonnet-4-6')
+        self.assertEqual(cheapest_flash(''),'')
+    def test_one_time_migration_lowers_saved_flash_tier_but_respects_later_choice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp)
+            s.state['jarvis_model']='gemini-3.8-flash-high'
+            edith=next(a for a in s.state['agents'] if a['name']=='EDITH');edith.update(model='gemini-3.8-flash-high',effort='high')
+            s.state.pop('cost_defaults_v071');s.save()
+            second=Store(tmp)
+            self.assertEqual(second.state['jarvis_model'],'gemini-3.8-flash-low')
+            edith=next(a for a in second.state['agents'] if a['name']=='EDITH')
+            self.assertEqual((edith['model'],edith['effort']),('gemini-3.8-flash-low','low'))
+            self.assertTrue(second.state['cost_defaults_v071'])
+            second.state['jarvis_model']='gemini-3.8-flash-high';second.save()
+            self.assertEqual(Store(tmp).state['jarvis_model'],'gemini-3.8-flash-high')
+    def test_version_bump_keeps_existing_chat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp);chats=[c['id'] for c in s.state['chats']];s.save()
+            again=Store(tmp)
+            self.assertEqual(again.state['version'],'0.7.4')
+            self.assertEqual([c['id'] for c in again.state['chats']],chats)
+    def test_live_research_steps_up_once_and_plain_chat_stays_cheap(self):
+        from unittest.mock import patch
+        for research,expected in ((False,'gemini-3.8-flash-low'),(True,'gemini-3.8-flash-medium')):
+            with tempfile.TemporaryDirectory() as tmp:
+                s=Store(tmp);s.integrations_enabled=True
+                s.action('connection-settings',{'jarvis_connector':'gemini','jarvis_model':'gemini-3.8-flash-low'})
+                captured=[]
+                class FakeGoogle:
+                    def __init__(self,*args):captured.append(args[-1])
+                    def run(self,*args):return 'tamam'
+                    def close(self):pass
+                with patch('app.GoogleConversation',FakeGoogle):
+                    s.launch_model('Kısa bir konuyu özetle','common',web_research=research);s.model_thread.join(3)
+                self.assertEqual(captured,[expected])
+    def test_auto_effort_can_be_switched_off(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp);s.integrations_enabled=True;s.state['auto_effort']=False
+            s.action('connection-settings',{'jarvis_connector':'gemini','jarvis_model':'gemini-3.8-flash-low'})
+            captured=[]
+            class FakeGoogle:
+                def __init__(self,*args):captured.append(args[-1])
+                def run(self,*args):return 'tamam'
+                def close(self):pass
+            with patch('app.GoogleConversation',FakeGoogle):
+                s.launch_model('Kısa bir konuyu özetle','common',web_research=True);s.model_thread.join(3)
+            self.assertEqual(captured,['gemini-3.8-flash-low'])
+
+class RobustnessTests(unittest.TestCase):
+    def test_missing_or_hung_keychain_means_no_key_not_a_crash(self):
+        import subprocess
+        from unittest.mock import patch
+        import free_chat
+        for failure in (FileNotFoundError('security'),subprocess.TimeoutExpired('security',8)):
+            with patch('free_chat.subprocess.run',side_effect=failure):
+                self.assertEqual(free_chat.key(),'');self.assertFalse(free_chat.has_key())
+    def test_unexpected_errors_are_logged_and_log_is_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp)
+            try:raise RuntimeError('canary-failure')
+            except RuntimeError:s.log_error('/api/test')
+            log=Path(tmp)/'server-errors.log'
+            self.assertIn('canary-failure',log.read_text());self.assertIn('/api/test',log.read_text())
+            log.write_text('x'*250000);s.log_error('/api/again')
+            self.assertLess(log.stat().st_size,150000)
+
+class ClaudeStatusRefreshTests(unittest.TestCase):
+    def test_signed_in_state_is_read_in_background_after_restart(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp);s.integrations_enabled=True
+            self.assertFalse(s.state['claude_status']['signed_in'])
+            with patch('claude_chat.status',return_value={'installed':True,'signed_in':True,'plan':'pro'}):
+                s.action('connection-status',{})
+                deadline=time.monotonic()+3
+                while s.claude_status_busy and time.monotonic()<deadline:time.sleep(.02)
+            self.assertTrue(s.state['claude_status']['signed_in']);self.assertIn('checked_at',s.state['claude_status'])
+    def test_status_is_not_polled_again_within_ten_minutes_and_not_when_integrations_off(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp)
+            with patch.object(s,'refresh_claude_status') as refresh:
+                s.action('connection-status',{});refresh.assert_not_called()
+                s.integrations_enabled=True;s.state['claude_status']['checked_at']=time.time()
+                s.action('connection-status',{});refresh.assert_not_called()
+                s.state['claude_status']['checked_at']=time.time()-700
+                s.action('connection-status',{});refresh.assert_called_once()
+
+
+class TeamCallHelpers:
+    def make(self):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        s=Store(tmp.name);s.integrations_enabled=True
+        s.action('connection-settings',{'jarvis_connector':'gemini','jarvis_model':'gemini-3.8-flash-low'})
+        return s
+    def settle(self,s,timeout=6):
+        end=time.time()+timeout;stable=0
+        while time.time()<end:
+            busy=bool(s.state['model_jobs']) or any(m.get('status')=='streaming' for m in s.state['messages'])
+            stable=0 if busy else stable+1
+            if stable>=8:return
+            time.sleep(.05)
+        self.fail('model jobs did not settle')
+    def fakes(self,google_replies,codex_replies=()):
+        calls=[]
+        google=list(google_replies);codex=list(codex_replies)
+        class FakeGoogle:
+            def __init__(self,directory,on_delta,cancelled,model=''):self.model=model
+            def run(self,prompt,image=None):
+                calls.append(('google',self.model,prompt));return google.pop(0) if google else 'Tamam.'
+            def close(self):pass
+        self.efforts=[]
+        efforts=self.efforts
+        class FakeCodex:
+            def __init__(self,directory,on_delta,cancelled,project_tools=False):pass
+            def run(self,prompt,image=None):
+                calls.append(('codex','',prompt));efforts.append(getattr(self,'effort',None));return codex.pop(0) if codex else 'Tamam.'
+            def close(self):pass
+        return calls,patch('app.GoogleConversation',FakeGoogle),patch('app.CodexConversation',FakeCodex)
+    def shared(self,s):return [m for m in s.state['messages'] if m.get('channel','common')=='common']
+
+class TeamCallTests(TeamCallHelpers,unittest.TestCase):
+    """JARVIS and Berke can call agents into the same chat; they see the chat and may hand work on (capped)."""
+    def test_named_agent_answers_in_the_same_chat_and_sees_it(self):
+        s=self.make()
+        s.message('YOU','Önce şu fikri konuşalım: mavi bahçe');s.message('JARVIS','Fikir güzel: mavi bahçe');s.state['messages'][-1]['model']='x'
+        calls,g,c=self.fakes(['EDITH yanıtı'])
+        with g,c:
+            s.action('converse',{'text':'EDITH’i çağır, bir şey eklesin','channel':'common'});self.settle(s)
+        last=self.shared(s)[-1]
+        self.assertEqual((last['author'],last['status'],last['text'],last['chat_id']),('EDITH','done','EDITH yanıtı',s.state['active_chat']))
+        self.assertEqual(sum(m['text'].startswith('EDITH’i çağır') for m in self.shared(s)),1)
+        self.assertEqual(len(calls),1);self.assertIn('mavi bahçe',calls[0][2]);self.assertIn('EDITH',calls[0][2]);self.assertNotIn('You are the JARVIS persona',calls[0][2])
+
+    def test_bare_mentions_and_negations_are_not_calls(self):
+        s=self.make()
+        for text in ('EDITH nedir?','Bana EDITH hakkında bilgi ver','EDITH’i çağırma','Do not call FRIDAY','FRIDAY çok iyi bir isim'):
+            self.assertEqual(s.parse_agent_calls(text),[],text)
+        self.assertEqual(s.parse_agent_calls('FRIDAY’e sor'),['FRIDAY'])
+        self.assertEqual(s.parse_agent_calls('call edith please'),['EDITH'])
+        self.assertEqual(s.parse_agent_calls('@EDITH ve @FRIDAY bakın'),['EDITH','FRIDAY'])
+        self.assertEqual(s.parse_agent_calls('FRIDAY, bunu yap'),['FRIDAY'])
+        self.assertTrue(set(s.parse_agent_calls('ekibi çağır')))
+        s.state['agents'][[a['name'] for a in s.state['agents']].index('EDITH')]['enabled']=False
+        self.assertEqual(s.parse_agent_calls('EDITH’i çağır'),[])
+
+    def test_two_named_agents_answer_in_order_and_second_sees_first(self):
+        s=self.make()
+        calls,g,c=self.fakes(['EDITH araştırdı'],['FRIDAY kodu yazdı'])
+        with g,c:
+            s.action('converse',{'text':'FRIDAY ve EDITH’i çağır, birlikte bir fikir üretin','channel':'common'});self.settle(s)
+        rows=[m for m in self.shared(s) if m.get('model')]
+        self.assertEqual([m['author'] for m in rows],['FRIDAY','EDITH'])
+        self.assertEqual([c_[0] for c_ in calls],['codex','google'])
+        self.assertIn('FRIDAY kodu yazdı',calls[1][2])
+        self.assertEqual(sum(m['author']=='YOU' for m in s.state['messages']),1)
+
+    def test_autonomous_handoff_is_followed_stripped_and_capped(self):
+        s=self.make()
+        calls,g,c=self.fakes(['İlk yanıt\nHANDOFF: FRIDAY: Kaynakları ara','Gözden geçirdim\nHANDOFF: FRIDAY: tekrar'],['Kaynaklar bulundu\nHANDOFF: EDITH: gözden geçir'])
+        with g,c:
+            s.action('converse',{'text':'Bu konuda güncel bilgiye ihtiyacım var, araştırıp kısa özet çıkar','channel':'common'});self.settle(s)
+        rows=[m for m in self.shared(s) if m.get('model')]
+        self.assertEqual([m['author'] for m in rows],['JARVIS','FRIDAY','EDITH'])
+        self.assertTrue(all('HANDOFF:' not in m['text'] for m in rows))
+        self.assertIn('Paslama → FRIDAY',rows[0]['text']);self.assertIn('Paslama → EDITH',rows[1]['text']);self.assertNotIn('Paslama',rows[2]['text'])
+        self.assertEqual(len(calls),3)
+        self.assertIn('HANDOFF: NAME',calls[0][2]);self.assertIn('İlk yanıt',calls[1][2]);self.assertIn('TASK HANDED OVER',calls[1][2]);self.assertNotIn('HANDOFF: NAME',calls[2][2])
+
+    def test_handoff_difficulty_sets_the_called_agents_effort(self):
+        s=self.make()
+        calls,g,c=self.fakes(['Tamam\nHANDOFF: FRIDAY/high: Zor bir iş'],['Bitti'])
+        with g,c:
+            s.action('converse',{'text':'Bu konuda uzun bir değerlendirme yapar mısın lütfen','channel':'common'});self.settle(s)
+        self.assertEqual(self.efforts,['high'])
+        rows=[m for m in self.shared(s) if m.get('model')]
+        self.assertIn('Paslama → FRIDAY (high)',rows[0]['text']);self.assertIn('effort high',rows[1]['model'])
+        s=self.make()
+        calls,g,c=self.fakes(['Tamam\nHANDOFF: EDITH/high: Zor bir araştırma','EDITH yanıtı'])
+        with g,c:
+            s.action('converse',{'text':'Bu konuda uzun bir değerlendirme yapar mısın lütfen','channel':'common'});self.settle(s)
+        self.assertEqual(calls[1][1],'gemini-3.8-flash-high')
+        s=self.make()
+        calls,g,c=self.fakes(['Tamam\nHANDOFF: FRIDAY: Rating yok'],['Bitti'])
+        with g,c:
+            s.action('converse',{'text':'Bu konuda uzun bir değerlendirme yapar mısın lütfen','channel':'common'});self.settle(s)
+        self.assertEqual(self.efforts,[None])
+
+    def test_plan_steps_carry_valid_effort_only(self):
+        from team_runner import parse_plan
+        agents=[{'name':'FRIDAY','connector':'codex'},{'name':'EDITH','connector':'gemini'}]
+        plan=parse_plan('{"summary":"x","steps":[{"owner":"FRIDAY","kind":"build","effort":"high","instruction":"a"},{"owner":"EDITH","kind":"research","effort":"extreme","instruction":"b"}]}',agents)
+        self.assertEqual(plan['steps'][0]['effort'],'high');self.assertNotIn('effort',plan['steps'][1])
+
+    def test_auto_handoff_off_unknown_and_self_targets_do_nothing(self):
+        for setup,reply in ((lambda s:s.state.update(auto_handoff=False),'Bitti\nHANDOFF: FRIDAY: yap'),(lambda s:None,'Bitti\nHANDOFF: GHOST: yap'),(lambda s:None,'Bitti\nHANDOFF: JARVIS: yap')):
+            s=self.make();setup(s)
+            calls,g,c=self.fakes([reply])
+            with g,c:
+                s.action('converse',{'text':'Bu konuda uzun bir değerlendirme yapar mısın lütfen','channel':'common'});self.settle(s)
+            rows=[m for m in self.shared(s) if m.get('model')]
+            self.assertEqual((len(calls),len(rows),rows[0]['text']),(1,1,'Bitti'))
+
+    def test_followup_is_skipped_with_a_note_when_the_chat_changed(self):
+        s=self.make();calls=[]
+        origin=s.state['active_chat']
+        class FakeGoogle:
+            def __init__(self,directory,on_delta,cancelled,model=''):pass
+            def run(self,prompt,image=None):
+                s.action('new-chat',{});return 'Bitti\nHANDOFF: FRIDAY: yap'
+            def close(self):pass
+        with patch('app.GoogleConversation',FakeGoogle),patch('app.CodexConversation') as codex:
+            s.launch_model('Bu konuda uzun bir değerlendirme yapar mısın lütfen','common')
+            s.model_thread.join(5);self.settle(s)
+            codex.assert_not_called()
+        notes=[m for m in s.state['messages'] if m['chat_id']==origin and m['text'].startswith('Paslama yapılmadı')]
+        self.assertEqual(len(notes),1)
+
+    def test_calls_need_live_chat(self):
+        s=self.make();s.integrations_enabled=False
+        calls,g,c=self.fakes(['x'])
+        with g,c:
+            s.action('converse',{'text':'EDITH’i çağır','channel':'common'})
+        self.assertEqual(calls,[])
+
+    def test_coordinator_tier_helper(self):
+        from model_catalog import coordinator_tier,with_tier
+        offered={'gemini-3.8-flash-low','gemini-3.8-flash-medium','gemini-3.8-flash-high'}
+        self.assertEqual(coordinator_tier('Selam'),'low')
+        self.assertEqual(coordinator_tier('Bu iki yaklaşımı karşılaştırır mısın?'),'medium')
+        self.assertEqual(coordinator_tier('x '*200),'high')
+        self.assertEqual(coordinator_tier('Selam',planning=True),'high')
+        self.assertEqual(coordinator_tier('Selam',delegation=True),'high')
+        self.assertEqual(with_tier('gemini-3.8-flash-high','low',offered),'gemini-3.8-flash-low')
+        self.assertEqual(with_tier('gemini-3.8-flash-low','high',{'gemini-3.8-flash-low','gemini-3.8-flash-medium'}),'gemini-3.8-flash-medium')
+        self.assertEqual(with_tier('claude-sonnet-4-6','high',offered),'claude-sonnet-4-6')
+
+    def test_unpinned_coordinator_picks_tier_per_message_and_pinned_does_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp);s.integrations_enabled=True
+            self.assertEqual(s.state['jarvis_model'],'gemini-3.8-flash-high');self.assertFalse(s.state.get('jarvis_model_pinned'))
+            s.state['jarvis_connector']='gemini'
+            calls,g,c=self.fakes([])
+            with g,c:
+                for text,planning in (('Selam',False),('Bu iki yaklaşımı karşılaştırıp hangisinin neden daha iyi olduğunu açıklar mısın lütfen',False),('Bir not uygulaması yapalım',True)):
+                    s.launch_model(text,'common',planning=planning);s.model_thread.join(3);self.settle(s)
+                self.assertEqual([c_[1] for c_ in calls],['gemini-3.8-flash-low','gemini-3.8-flash-medium','gemini-3.8-flash-high'])
+                s.action('connection-settings',{'jarvis_connector':'gemini','jarvis_model':'gemini-3.8-flash-medium'})
+                self.assertTrue(s.state['jarvis_model_pinned']);calls.clear()
+                s.launch_model('Selam','common');s.model_thread.join(3);self.settle(s)
+                self.assertEqual(calls[0][1],'gemini-3.8-flash-medium')
+                s.action('connection-settings',{'jarvis_connector':'gemini','jarvis_model':'auto'})
+                self.assertFalse(s.state['jarvis_model_pinned']);self.assertEqual(s.state['jarvis_model'],'gemini-3.8-flash-high')
+
+    def test_migration_gives_the_coordinator_the_strongest_tier_unless_pinned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp);s.state['jarvis_model']='gemini-3.8-flash-low';s.state.pop('coordinator_tier_v072');s.save()
+            self.assertEqual(Store(tmp).state['jarvis_model'],'gemini-3.8-flash-high')
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp);s.state.update(jarvis_model='gemini-3.8-flash-low',jarvis_model_pinned=True);s.state.pop('coordinator_tier_v072');s.save()
+            self.assertEqual(Store(tmp).state['jarvis_model'],'gemini-3.8-flash-low')
+
+
+class CodeRoutingTests(TeamCallHelpers,unittest.TestCase):
+    """Small code asks go straight to a code agent; JARVIS only announces it."""
+    def test_code_request_heuristic(self):
+        s=self.make()
+        for text in ('Python’da hello world yazdıran komut ver','Bana bir bash script yaz','JavaScript fonksiyon lazım, iki sayıyı toplasın','write a python function that reverses a string'):
+            self.assertTrue(s.code_request(text),text)
+        for text in ('Python nedir?','Nasıl Python öğrenirim','Bir not uygulaması yapalım, kod yazalım','Merhaba','Bu kodu anlat','x '*200):
+            self.assertFalse(s.code_request(text),text)
+
+    def test_code_agent_prefers_claude_then_codex_and_skips_exhausted(self):
+        s=self.make()
+        vision=next(a for a in s.state['agents'] if a['name']=='VISION')
+        vision['connector']='claude_google';self.assertEqual(s.code_agent(),'FRIDAY')
+        vision['connector']='claude_code';self.assertEqual(s.code_agent(),'FRIDAY')
+        s.state['claude_status']={'installed':True,'signed_in':True};self.assertEqual(s.code_agent(),'VISION')
+        vision['enabled']=False;self.assertEqual(s.code_agent(),'FRIDAY')
+        s.state['provider_usage']['FRIDAY']={'status':'live','primary':{'used_percent':100}};self.assertIsNone(s.code_agent())
+        vision['enabled']=True;self.assertEqual(s.code_agent(),'VISION')
+
+    def test_simple_code_ask_is_routed_without_a_coordinator_call(self):
+        s=self.make()
+        calls,g,c=self.fakes(['print("Merhaba")'],['print("Merhaba")'])
+        with g,c:
+            s.action('converse',{'text':'Python’da hello world yazdıran komut ver','channel':'common'});self.settle(s)
+        rows=self.shared(s)
+        self.assertEqual([m['author'] for m in rows if m['author']!='YOU'][-2:],['JARVIS','FRIDAY'])
+        self.assertEqual(rows[-2]['provider'],'rules');self.assertIn('FRIDAY',rows[-2]['text'])
+        self.assertEqual(rows[-1]['text'],'print("Merhaba")')
+        self.assertEqual(len(calls),1);self.assertIn('JARVIS routed',calls[0][2])
+        self.assertEqual(self.efforts,['low']);self.assertIn('effort low',rows[-1]['model'])
+        self.assertEqual(sum(m['author']=='YOU' for m in s.state['messages']),1)
+
+    def test_harder_code_ask_goes_through_the_coordinator_who_rates_it(self):
+        s=self.make()
+        calls,g,c=self.fakes(['Tamam\nHANDOFF: FRIDAY/high: Thread kullanan hızlı karşılaştırma komutu'],['Kod hazır'])
+        with g,c:
+            s.action('converse',{'text':'Python’da iki büyük dosyayı thread kullanarak karşılaştıran ve test eden hızlı bir komut ver','channel':'common'});self.settle(s)
+        self.assertEqual([c_[0] for c_ in calls],['google','codex']);self.assertEqual(self.efforts,['high'])
+        self.assertEqual([m['author'] for m in self.shared(s) if m.get('model')],['JARVIS','FRIDAY'])
+
+    def test_code_ask_falls_to_chatgpt_when_claude_is_off_and_stays_with_jarvis_when_handoff_is_off(self):
+        s=self.make();next(a for a in s.state['agents'] if a['name']=='VISION')['enabled']=False
+        calls,g,c=self.fakes([],['codex kodu'])
+        with g,c:
+            s.action('converse',{'text':'Bana bir bash script yaz, dosyaları saysın','channel':'common'});self.settle(s)
+        self.assertEqual([c_[0] for c_ in calls],['codex']);self.assertEqual(self.shared(s)[-1]['author'],'FRIDAY')
+        s=self.make();s.state['auto_handoff']=False
+        calls,g,c=self.fakes(['JARVIS cevabı'])
+        with g,c:
+            s.action('converse',{'text':'Bana bir bash script yaz, dosyaları saysın','channel':'common'});self.settle(s)
+        self.assertEqual([c_[0] for c_ in calls],['google']);self.assertEqual(self.shared(s)[-1]['author'],'JARVIS')
+
+
+class TeamCharterTests(TeamCallHelpers,unittest.TestCase):
+    """Every agent is taught the same team structure inside its own prompt."""
+    def test_roles_migration_updates_old_defaults_but_keeps_custom_roles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s=Store(tmp)
+            roles={a['name']:a['role'] for a in s.state['agents']}
+            self.assertIn('baş',roles['VISION']);self.assertIn('Yardımcı yazılımcı',roles['FRIDAY']);self.assertIn('Araştırmacı',roles['EDITH'])
+            for a in s.state['agents']:
+                if a['name']=='VISION':a['role']='Ana geliştirici · kod ve dosya düzenleme'
+                if a['name']=='FRIDAY':a['role']='Benim özel rolüm'
+            s.state.pop('roles_v073');s.save()
+            again={a['name']:a['role'] for a in Store(tmp).state['agents']}
+            self.assertIn('baş',again['VISION']);self.assertEqual(again['FRIDAY'],'Benim özel rolüm')
+    def test_charter_names_roles_and_reaches_called_agents_and_coordinator(self):
+        s=self.make()
+        charter=s.team_charter('EDITH')
+        for word in ('Berke owns','JARVIS (Gemini) is the coordinator','VISION','FRIDAY','EDITH','You are EDITH'):self.assertIn(word,charter)
+        calls,g,c=self.fakes(['EDITH yanıtı','JARVIS yanıtı'])
+        with g,c:
+            s.action('converse',{'text':'EDITH’i çağır, kendini tanıtsın','channel':'common'});self.settle(s)
+            s.action('converse',{'text':'Bugün hangi işleri planlıyoruz, bana kısa bir özet ver lütfen','channel':'common'});self.settle(s)
+        self.assertIn('You are EDITH',calls[0][2]);self.assertIn('TEAM CHARTER',calls[1][2]);self.assertIn('You are JARVIS',calls[1][2])
+    def test_planning_prompt_carries_the_charter(self):
+        from team_runner import planning_prompt
+        s=self.make();self.assertIn('TEAM CHARTER',planning_prompt(s,'Bir uygulama yapalım',''))
+
+
+class TurboPermissionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.store=Store(self.tmp.name)
+    def pending(self,kind,chat_id=None):
+        chat_id=chat_id or self.store.state['active_chat'];event=threading.Event()
+        self.store.state['work_requests'].append(dict(id='r-'+kind,chat_id=chat_id,kind=kind,status='pending',expires=time.time()+60,reason='x'))
+        self.store.work_events['r-'+kind]=event;return event
+    def chat(self):return next(c for c in self.store.state['chats'] if c['id']==self.store.state['active_chat'])
+    def test_turbo_auto_approves_edits_and_tests_but_never_computer_control(self):
+        s=self.store
+        for kind in ('file','test'):self.assertTrue(s.auto_approved('turbo',kind))
+        self.assertFalse(s.auto_approved('turbo','desktop'))
+        self.assertTrue(s.auto_approved('auto_files','file'));self.assertFalse(s.auto_approved('auto_files','test'))
+        for kind in ('file','test','desktop'):self.assertFalse(s.auto_approved('ask',kind));self.assertFalse(s.auto_approved('read_only',kind))
+    def test_permission_modes_include_turbo_and_reject_unknown(self):
+        self.store.action('project-permission',{'mode':'turbo'});self.assertEqual(self.chat()['work_permission'],'turbo')
+        with self.assertRaises(ValueError):self.store.action('project-permission',{'mode':'root'})
+        self.assertEqual(self.chat()['work_permission'],'turbo')
+    def test_always_allow_upgrades_this_chat_once_and_only_for_edits_and_tests(self):
+        event=self.pending('file')
+        self.store.action('work-decision',{'id':'r-file','decision':'approved','always':True})
+        self.assertTrue(event.is_set());self.assertEqual(self.chat()['work_permission'],'turbo')
+        self.assertEqual(next(r for r in self.store.state['work_requests'] if r['id']=='r-file')['status'],'approved')
+        self.store.action('project-permission',{'mode':'ask'});self.pending('desktop')
+        self.store.action('work-decision',{'id':'r-desktop','decision':'approved','always':True})
+        self.assertEqual(self.chat()['work_permission'],'ask')
+    def test_rejecting_or_read_only_chats_never_upgrade(self):
+        self.pending('test');self.store.action('work-decision',{'id':'r-test','decision':'rejected','always':True})
+        self.assertNotEqual(self.chat().get('work_permission'),'turbo')
+        self.store.action('project-permission',{'mode':'read_only'});self.pending('file')
+        self.store.action('work-decision',{'id':'r-file','decision':'approved','always':True})
+        self.assertEqual(self.chat()['work_permission'],'read_only')
+
+
+class PhotoRoutingTests(TeamCallHelpers,unittest.TestCase):
+    """Photos and video contact sheets are JPEGs; only Codex can read them, so the shared chat hands them to FRIDAY."""
+    JPEG='data:image/jpeg;base64,'+__import__('base64').b64encode(b'\xff\xd8\xff\xe0'+b'0'*40).decode()
+    def codex(self,seen):
+        class FakeCodex:
+            def __init__(self,directory,on_delta,cancelled,project_tools=False):pass
+            def run(self,prompt,image=None):seen.append((prompt,image));return 'Fotoğrafta bir masa var.'
+            def close(self):pass
+        return patch('app.CodexConversation',FakeCodex)
+    def test_photo_in_common_chat_is_answered_by_the_codex_agent(self):
+        s=self.make();seen=[]
+        with self.codex(seen):
+            s.action('converse',{'text':'Bu fotoğrafta ne var?','channel':'common','image':self.JPEG});self.settle(s)
+        rows=[m for m in self.shared(s) if m.get('model')]
+        self.assertEqual(rows[-1]['author'],'FRIDAY');self.assertEqual(rows[-1]['text'],'Fotoğrafta bir masa var.')
+        self.assertEqual([image for _,image in seen],[self.JPEG])
+        self.assertTrue(any(m['author']=='JARVIS' and 'FRIDAY' in m['text'] and 'görsel' in m['text'].lower() for m in self.shared(s)))
+        user=[m for m in self.shared(s) if m['author']=='YOU'][-1];self.assertIn('Görsel eklendi',user['text']);self.assertNotIn(self.JPEG,json.dumps(s.state['messages']))
+    def test_photo_without_an_available_codex_agent_says_why(self):
+        s=self.make()
+        s.state['agents'][[a['name'] for a in s.state['agents']].index('FRIDAY')]['enabled']=False
+        with self.assertRaises(ValueError) as caught:s.action('converse',{'text':'Bu nedir?','channel':'common','image':self.JPEG})
+        self.assertIn('FRIDAY',str(caught.exception))
+    def test_photo_keeps_the_normal_route_when_jarvis_already_is_codex(self):
+        s=self.make();s.state['jarvis_connector']='codex'
+        self.assertIsNone(s.image_agent('Bu nedir?'))
+    def test_non_jpeg_images_are_still_refused(self):
+        s=self.make()
+        with self.assertRaises(ValueError):s.action('converse',{'text':'Bu nedir?','channel':'common','image':'data:image/png;base64,AAAA'})
+
+    def test_reader_writes_a_visual_note_prompt_and_followups_reuse_the_photo(self):
+        s=self.make();seen=[]
+        with self.codex(seen):
+            s.action('converse',{'text':'Bu ekran görüntüsündeki hatayı anla','channel':'common','image':self.JPEG});self.settle(s)
+            s.action('converse',{'text':'FRIDAY’e sor, fotoğraftaki hatayı bir daha açıklasın','channel':'common'});self.settle(s)
+            s.action('converse',{'text':'FRIDAY’e sor, bugün hava nasıl olur','channel':'common'});self.settle(s)
+        self.assertIn('Visual note',seen[0][0]);self.assertEqual(seen[0][1],self.JPEG)
+        self.assertEqual(seen[1][1],self.JPEG)
+        self.assertIsNone(seen[2][1])
+        self.assertNotIn('data:image',json.dumps(s.state))
+    def test_remembered_photo_is_only_for_codex_agents_and_expires(self):
+        s=self.make();seen=[]
+        s.remember_image(s.state['active_chat'],self.JPEG)
+        self.assertEqual(s.recent_image('fotoğrafa bak'),self.JPEG);self.assertIsNone(s.recent_image('bugün plan yapalım'))
+        s.chat_images[s.state['active_chat']]=(self.JPEG,time.time()-3000)
+        self.assertIsNone(s.recent_image('fotoğrafa bak'))
+        s.remember_image(s.state['active_chat'],self.JPEG)
+        calls,g,c=self.fakes(['EDITH yanıtı'])
+        with g,c:
+            s.action('converse',{'text':'EDITH’i çağır, fotoğrafı yorumlasın','channel':'common'});self.settle(s)
+        self.assertEqual(len(calls),1)
+
+
+class ActiveWorkTests(TeamCallHelpers,unittest.TestCase):
+    """The bottom bubble lists every running agent, in this chat and in other chats/projects."""
+    def test_running_agents_are_listed_with_summary_chat_and_project(self):
+        s=self.make();gate=threading.Event();seen=[]
+        class SlowGoogle:
+            def __init__(self,directory,on_delta,cancelled,model=''):pass
+            def run(self,prompt,image=None):gate.wait(5);return 'Tamam.'
+            def close(self):pass
+        first=s.state['active_chat'];s.state['chats'][0]['active_project']='Mavi Bahçe'
+        with patch('app.GoogleConversation',SlowGoogle):
+            s.action('converse',{'text':'EDITH’i çağır, internetten güncel haberleri araştırsın','channel':'common'})
+            rows=s.state_view()['active_work'] if hasattr(s,'state_view') else s.active_work()
+            self.assertEqual(len(rows),1)
+            row=rows[0]
+            self.assertEqual((row['agent'],row['mode'],row['current'],row['project'],row['chat_id']),('EDITH','research',True,'Mavi Bahçe',first))
+            self.assertIn('araştırsın',row['summary']);self.assertFalse(row['writing']);self.assertTrue(row['started_at'])
+            s.action('new-chat',{})
+            self.assertTrue(all(r['current'] is False for r in s.active_work()))
+            self.assertEqual(s.active_work()[0]['chat_id'],first)
+            gate.set();self.settle(s,8)
+        self.assertEqual(s.active_work(),[])
+    def test_team_run_without_a_running_job_shows_one_row(self):
+        s=self.make();parent=s.state['active_chat']
+        s.state['teams'].append(dict(id='t1',parent_chat=parent,goal='Bir uygulama yapalım',status='working',stage='Plan hazırlanıyor',children=[],outputs=[]))
+        rows=s.active_work();self.assertEqual([(r['agent'],r['mode'],r['activity']) for r in rows],[('JARVIS','team','Plan hazırlanıyor')])
+        s.state['teams'][0]['status']='review';self.assertEqual(s.active_work(),[])
+
+
+class GeminiPictureTests(TeamCallHelpers,unittest.TestCase):
+    """Gemini (JARVIS) looks at pictures through the CLI's file tool, but only after the self-test proved it works."""
+    JPEG=PhotoRoutingTests.JPEG
+    def fake_agy(self,response='zorgblat_7'):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);root=Path(tmp.name)
+        script=root/'agy'
+        script.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > '+str(root/'args.txt')+'\nls -1 > '+str(root/'ls.txt')+'\n'
+            'case "$*" in *stream-json*)\n'
+            'echo \'{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"read_file","tool_info":{"parameters":{}}}}\'\n'
+            'echo \'{"event":"result","result":{"status":"SUCCESS","response":"'+response+'"}}\';;\n'
+            '*) echo \'{"status":"SUCCESS","response":"'+response+'"}\';;\nesac\n')
+        script.chmod(0o755);return root,script
+    def test_cli_gets_a_private_read_allowed_copy_that_is_deleted_afterwards(self):
+        from google_chat import GoogleConversation
+        root,script=self.fake_agy()
+        with patch('google_chat.binary',return_value=str(script)):
+            client=GoogleConversation(str(root),lambda _:None,threading.Event());answer=client.run('Ne yazıyor?',self.JPEG)
+        self.assertEqual(answer,'zorgblat_7');self.assertEqual(client.tools_used,['read_file'])
+        args=(root/'args.txt').read_text().split('\n')
+        settings=json.loads(args[args.index('--settings')+1])
+        self.assertNotIn('read_file(*)',settings['permissions']['deny']);self.assertIn('write_file(*)',settings['permissions']['deny'])
+        name=[a for a in settings['permissions']['allow'] if a.startswith('read_file(')][0]
+        self.assertIn('attachment-',name);self.assertEqual(args[args.index('--output-format')+1],'stream-json')
+        self.assertIn('attachment-',(root/'ls.txt').read_text())
+        self.assertEqual(list((root/'google-chat-workspace').glob('attachment-*')),[])
+        self.assertIn('Open that one file',args[args.index('-p')+1])
+    def test_without_a_picture_file_reading_stays_denied(self):
+        from google_chat import GoogleConversation
+        root,script=self.fake_agy('Merhaba')
+        with patch('google_chat.binary',return_value=str(script)):
+            GoogleConversation(str(root),lambda _:None,threading.Event()).run('Selam')
+        args=(root/'args.txt').read_text().split('\n');settings=json.loads(args[args.index('--settings')+1])
+        self.assertIn('read_file(*)',settings['permissions']['deny']);self.assertEqual(args[args.index('--output-format')+1],'json')
+    def test_non_jpeg_pictures_are_refused_before_the_cli_starts(self):
+        from google_chat import GoogleConversation
+        root,script=self.fake_agy()
+        with patch('google_chat.binary',return_value=str(script)):
+            with self.assertRaises(ValueError):GoogleConversation(str(root),lambda _:None,threading.Event()).run('x','data:image/png;base64,AAAA')
+        self.assertFalse((root/'args.txt').exists())
+    def probe(self,s,answer):
+        class FakeGoogle:
+            tools_used=['read_file']
+            def __init__(self,directory,on_delta,cancelled,model=''):pass
+            def run(self,prompt,image=None):return answer
+            def close(self):pass
+        with patch('app.GoogleConversation',FakeGoogle):
+            s.action('vision-test',{})
+            end=time.time()+5
+            while s.state['vision']['status']=='testing' and time.time()<end:time.sleep(.05)
+        return s.state['vision']
+    def test_self_test_enables_vision_only_when_the_unique_token_is_read(self):
+        s=self.make();self.assertEqual(s.state['vision']['status'],'unknown')
+        self.assertEqual(self.probe(s,'Cevap: bilmiyorum, görseli göremiyorum')['status'],'no')
+        self.assertFalse(s.jarvis_can_see())
+        self.assertEqual(self.probe(s,'zorgblat_7')['status'],'ok');self.assertTrue(s.jarvis_can_see());self.assertEqual(s.state['vision']['variant'],'review')
+    def test_self_test_tries_the_permission_variants_and_remembers_the_one_that_works(self):
+        s=self.make();seen=[]
+        class FakeGoogle:
+            tools_used=['read_file'];debug='result/status=SUCCESS'
+            def __init__(self,directory,on_delta,cancelled,model=''):pass
+            def run(self,prompt,image=None):
+                seen.append(self.picture_mode)
+                if self.picture_mode!='strict':raise ValueError('Antigravity boş yanıt döndürdü.')
+                return 'zorgblat_7'
+            def close(self):pass
+        with patch('app.GoogleConversation',FakeGoogle):
+            s.action('vision-test',{});end=time.time()+5
+            while s.state['vision']['status']=='testing' and time.time()<end:time.sleep(.05)
+        self.assertEqual(seen,['review','strict']);self.assertEqual((s.state['vision']['status'],s.state['vision']['variant']),('ok','strict'))
+        self.assertIn('review: Antigravity boş yanıt',s.state['vision']['message'])
+    def photo_run(self,s,text,vision):
+        s.state['vision']={'status':vision};seen={'google':[],'codex':[]}
+        class FakeGoogle:
+            def __init__(self,directory,on_delta,cancelled,model=''):self.model=model
+            def run(self,prompt,image=None):seen['google'].append((self.model,image,prompt));return 'Gemini yanıtı'
+            def close(self):pass
+        class FakeCodex:
+            def __init__(self,directory,on_delta,cancelled,project_tools=False):pass
+            def run(self,prompt,image=None):seen['codex'].append(image);return 'Codex yanıtı'
+            def close(self):pass
+        with patch('app.GoogleConversation',FakeGoogle),patch('app.CodexConversation',FakeCodex):
+            s.action('converse',{'text':text,'channel':'common','image':self.JPEG});self.settle(s)
+        return seen
+    def test_jarvis_answers_a_screenshot_itself_once_gemini_can_see(self):
+        s=self.make();seen=self.photo_run(s,'Bu ekran görüntüsünde ne yazıyor?','ok')
+        self.assertEqual(len(seen['google']),1);self.assertEqual(seen['google'][0][1],self.JPEG);self.assertEqual(seen['codex'],[])
+        self.assertIn('answer it directly',seen['google'][0][2])
+        rows=[m for m in self.shared(s) if m.get('model')];self.assertEqual(rows[-1]['author'],'JARVIS')
+    def test_screenshot_goes_to_the_codex_agent_while_gemini_cannot_see(self):
+        for state in ('unknown','no','error'):
+            s=self.make();seen=self.photo_run(s,'Bu ekran görüntüsünde ne yazıyor?',state)
+            self.assertEqual(seen['google'],[],state);self.assertEqual(seen['codex'],[self.JPEG],state)
+    def test_a_named_gemini_agent_receives_the_picture_only_when_it_can_see(self):
+        s=self.make();seen=self.photo_run(s,'EDITH’i çağır, bu ekran görüntüsüne baksın','ok')
+        self.assertEqual([(m,i) for m,i,_ in seen['google']][:1],[(seen['google'][0][0],self.JPEG)]);self.assertEqual(seen['codex'],[])
+        self.assertEqual([m['author'] for m in self.shared(s) if m.get('model')][-1],'EDITH')
+        s=self.make();seen=self.photo_run(s,'EDITH’i çağır, bu ekran görüntüsüne baksın','no')
+        self.assertEqual(seen['codex'],[self.JPEG])
