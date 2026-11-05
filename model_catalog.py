@@ -34,10 +34,33 @@ def with_tier(model,tier,available):
         if candidate in available:return candidate
     return model
 
+def pick_gemini(catalog,family,depth):
+    """Best Gemini catalog id for a family ('pro', 'flash' or 'lite') and a depth ('low', 'medium', 'high').
+    Returns '' when the catalog does not offer that family. Used once to give each agent a fixed model."""
+    def named(row,pattern):return re.search(pattern,(str(row.get('id',''))+' '+str(row.get('name',''))).lower()) is not None
+    rows=[m for m in catalog if str(m.get('id','')).startswith('gemini')]
+    if family=='pro':ids=[m['id'] for m in rows if named(m,r'(^|[-\s])pro($|[-\s])') and not named(m,'lite')]
+    elif family=='lite':ids=[m['id'] for m in rows if named(m,'lite')]
+    else:ids=[m['id'] for m in rows if named(m,'flash') and not named(m,'lite')]
+    if not ids:return ''
+    def tier(i):
+        found=re.search(r'-(low|medium|high)$',i);return found.group(1) if found else ''
+    for wanted in {'low':('low','medium','high',''),'medium':('medium','high','low',''),'high':('high','medium','low','')}[depth]:
+        for i in ids:
+            if tier(i)==wanted:return i
+    return ids[0]
+
 def cheapest_flash(model):
     """One-time cost migration helper: Flash medium/high saved settings fall back to low."""
     m=_FLASH.match(model or '')
     return m.group(1)+'-low' if m and m.group(2)!='low' else model
+
+def own_models(key,models):
+    """Each connector lists only its own model family (no OpenAI model under Gemini, no Gemini under Claude)."""
+    prefix={'gemini':'gemini','claude_google':'claude'}.get(key)
+    if not prefix:return models
+    rows=[m for m in models if str(m.get('id','')).startswith(prefix)]
+    return rows or models
 
 DEFAULTS={'claude_code':'sonnet','codex':'','gemini':'gemini-3.8-flash-low','claude_google':'claude-sonnet-4-6','local':'gemma3:4b','openrouter':'openrouter/free','manual':''}
 
@@ -82,7 +105,7 @@ def discover():
             try:result[key]=f.result()
             except Exception as error:errors[key]=str(error)[:180]
     if 'google' in result:
-        result['gemini']=[m for m in result['google'] if not m['id'].startswith('claude')]
+        result['gemini']=own_models('gemini',[m for m in result['google'] if not m['id'].startswith('claude')])
         result['claude_google']=[m for m in result.pop('google') if m['id'].startswith('claude')]
     result['local']=[{'id':'gemma3:4b','name':'Gemma 3 · bu Mac'},{'id':'qwen3.5:4b-q4_K_M','name':'Qwen 3.5 · bu Mac'}]
     result['manual']=[{'id':'','name':'Manuel aktarım'}]

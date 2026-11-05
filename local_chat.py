@@ -13,6 +13,7 @@ MODEL='gemma3:4b'
 ALLOWED_MODELS={'gemma3:4b','qwen3.5:4b-q4_K_M'}
 PORT=11435
 ROOT=Path(__file__).resolve().parent
+RES=Path(os.environ.get('JARVIS_RESOURCES') or ROOT.parent)
 
 class LocalEngine:
     def __init__(self,directory):
@@ -24,7 +25,7 @@ class LocalEngine:
         if model not in ALLOWED_MODELS:raise ValueError('Desteklenmeyen yerel model.')
         self.model=model
     def binary(self):
-        for item in (ROOT.parent/'ollama/ollama',ROOT/'runtime/ollama'):
+        for item in (RES/'ollama/ollama',ROOT/'runtime/ollama'):
             if item.is_file():return item
         return None
     def installed(self):

@@ -1,9 +1,9 @@
 'use strict';
 // One conversation, contextual tools, optional project pane. No separate memory/screen/approval destinations.
 document.querySelectorAll('.rail-btn[data-view="memory"],.rail-btn[data-view="screen"],.rail-btn[data-view="approvals"]').forEach(b=>b.remove());
-$('.page-heading .eyebrow').innerHTML='BERKE’S WORKSPACE <span>/</span> <b id="buildBadge">v0.7.4</b>';
+$('.page-heading .eyebrow').innerHTML='BERKE’S WORKSPACE <span>/</span> <b id="buildBadge">v0.7.6</b>';
 $('#pageTitle').textContent='Merhaba Berke.';$('#pageSubtitle').textContent='Bir sohbet. Bütün ekip.';
-$('.page-footer').innerHTML='<span>JARVIS <b>MARK IV · v0.7.4</b></span><span>MAC · LOCAL FIRST</span>';
+$('.page-footer').innerHTML='<span>JARVIS <b>MARK IV · v0.7.6</b></span><span>MAC · LOCAL FIRST</span>';
 $('.memory-mini').classList.add('hidden');
 const railLabels={mission:['Sohbet','◌'],project:['Proje','⌥'],settings:['Ayarlar','⚙']};
 document.querySelectorAll('.rail-btn').forEach(b=>{const [label,icon]=railLabels[b.dataset.view];b.innerHTML='<span>'+icon+'</span><small>'+label+'</small>';b.setAttribute('aria-label',label);});
@@ -48,7 +48,7 @@ view=async function(name){
  $('#settings').classList.add('hidden');document.body.classList.remove('drawer-open');await oldView(name);
  if(name==='mission'){$('#pageTitle').textContent='Merhaba Berke.';$('#pageSubtitle').textContent='Bir sohbet. Bütün ekip.';}
 };
-const preferences=document.createElement('section');preferences.className='personal-preferences';preferences.innerHTML='<h3>Dil & ses</h3><div class="preference-grid"><label>Language / Dil<select id="languageChoice"><option value="tr">Türkçe</option><option value="en">English</option></select></label><label>Sesli giriş dili<select id="speechLanguageChoice"><option value="auto">Arayüz diliyle aynı</option><option value="tr-TR">Türkçe</option><option value="en-GB">English (UK)</option></select></label><label>Asistan sesi<select id="voiceChoice"><option value="">Otomatik · sakin</option></select></label><button id="voicePreview" class="button">Sesi dene</button></div><p class="muted">Türkçe Yelda, English Samantha. Yalnızca kadın asistan sesleri. Kalite, Mac’te yüklü ses paketlerine bağlıdır.</p><h3>Yerel model</h3><p id="localModelState" class="muted"></p><p class="muted">Qwen3 1.7B · 2048 bağlam · düşünme kapalı · kısa, akışlı yanıt. Basit yönlendirme, hesap ve görev durumu model kullanmaz. Yerel başarısız olursa buluta sessiz geçiş yapılmaz.</p>';
+const preferences=document.createElement('section');preferences.className='personal-preferences';preferences.innerHTML='<h3>Dil & ses</h3><div class="preference-grid"><label>Language / Dil<select id="languageChoice"><option value="tr">Türkçe</option><option value="en">English</option></select></label><label>Sesli giriş dili<select id="speechLanguageChoice"><option value="auto">Otomatik · Türkçe + English</option><option value="tr-TR">Türkçe</option><option value="en-GB">English (UK)</option></select></label><label>Asistan sesi<select id="voiceChoice"><option value="">Otomatik · sakin</option></select></label><button id="voicePreview" class="button">Sesi dene</button></div><p class="muted">Türkçe Yelda, English Samantha. Yalnızca kadın asistan sesleri. Kalite, Mac’te yüklü ses paketlerine bağlıdır.</p><h3>Yerel model</h3><p id="localModelState" class="muted"></p><p class="muted">Qwen3 1.7B · 2048 bağlam · düşünme kapalı · kısa, akışlı yanıt. Basit yönlendirme, hesap ve görev durumu model kullanmaz. Yerel başarısız olursa buluta sessiz geçiş yapılmaz.</p>';
 $('#settings .connection-panel').after(preferences);
 $('#languageChoice').onchange=()=>safe(async()=>{await api('connection-settings',{language:$('#languageChoice').value});setUILanguage(state.language);nativeSend('preferences',{language:state.language,speechLanguage:state.speech_language});});
 $('#speechLanguageChoice').onchange=()=>safe(async()=>{await api('connection-settings',{speech_language:$('#speechLanguageChoice').value});nativeSend('preferences',{language:state.language,speechLanguage:state.speech_language});});

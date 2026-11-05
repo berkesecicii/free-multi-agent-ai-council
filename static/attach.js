@@ -68,12 +68,12 @@ async function attachFile(file){
   if(file.type.startsWith('video/')||/\.(mp4|mov|m4v|webm)$/i.test(file.name)){
     toast(tr('Video kareleri hazırlanıyor…','Preparing video frames…'));
     const sheet=await videoToSheet(file);
-    show(sheet.image,tr('Bu videoya bak, kısaca ne olduğunu söyle.','Look at this video and tell me briefly what it is.'),tr(`Video (${sheet.frames} kare özeti${sheet.duration?' · '+clock(sheet.duration):''}) FRIDAY’e (ChatGPT) gönderilecek`,`Video (${sheet.frames}-frame summary${sheet.duration?' · '+clock(sheet.duration):''}) will be sent to FRIDAY (ChatGPT)`));
+    show(sheet.image,tr('Bu videoya bak, kısaca ne olduğunu söyle.','Look at this video and tell me briefly what it is.'),tr(`Video (${sheet.frames} kare özeti${sheet.duration?' · '+clock(sheet.duration):''}) görsel okuyabilen ajana gönderilecek`,`Video (${sheet.frames}-frame summary${sheet.duration?' · '+clock(sheet.duration):''}) will be sent to an image-capable agent`));
     return;
   }
   if(file.type.startsWith('image/')||/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name)){
     const image=await photoToJpeg(file);
-    show(image,tr('Bu fotoğrafa bak, kısaca ne olduğunu söyle.','Look at this photo and tell me briefly what it is.'),tr('Bu fotoğraf FRIDAY’e (ChatGPT) gönderilecek','This photo will be sent to FRIDAY (ChatGPT)'));
+    show(image,tr('Bu fotoğrafa bak, kısaca ne olduğunu söyle.','Look at this photo and tell me briefly what it is.'),tr('Fotoğraf görsel okuyabilen seçili ajana gönderilecek','The photo will go to the selected image-capable agent'));
     return;
   }
   throw new Error(tr('Yalnızca fotoğraf ve video eklenebilir.','Only photos and videos can be attached.'));
@@ -87,4 +87,50 @@ $('#prompt').addEventListener('paste',e=>{const file=[...(e.clipboardData?.files
 // Restore the original chip text once the attachment is cleared (screen shares reuse the same chip).
 new MutationObserver(()=>{if(chip.classList.contains('hidden')&&label&&label.textContent!==original)label.textContent=original;}).observe(chip,{attributes:true,attributeFilter:['class']});
 window.addEventListener('jarvis-language',setTitle);
+})();
+
+// Persistent attachments, document previews and a quiet three-action tools menu.
+(()=>{
+let pendingDocs=[];const input=$('#attachInput'),attach=$('#attachButton');
+input.accept='image/*,video/*,.pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json,.html,.htm,.rtf,.odt,.ods,.odp,.log,.xml,.yaml,.yml';
+attach.title=tr('Fotoğraf veya belge ekle','Attach photo or document');attach.setAttribute('aria-label',attach.title);
+const pending=document.createElement('div');pending.className='pending-documents';$('#composer').prepend(pending);
+function drawPending(){pending.replaceChildren();for(const d of pendingDocs){const b=document.createElement('button');b.type='button';b.className='attachment-chip';b.textContent='📄 '+d.name+' ×';b.title=tr('Göndermeden kaldır','Remove before sending');b.onclick=()=>{pendingDocs=pendingDocs.filter(x=>x.id!==d.id);drawPending();};pending.append(b);}}
+const oldChange=input.onchange;
+async function upload(file){
+ if(file.size>25*1024*1024)throw new Error(tr('Dosya 25 MB sınırını aşıyor.','The file exceeds 25 MB.'));
+ if(pendingDocs.length>=4)throw new Error(tr('En fazla dört belge ekle.','Attach up to four documents.'));
+ const chatId=state.active_chat;toast(tr('Belge okunuyor…','Reading document…'));
+ const response=await fetch('/upload',{method:'POST',headers:{'X-Jarvis-Token':state.csrf,'X-File-Name':encodeURIComponent(file.name),'X-Chat-Id':chatId},body:file});
+ const value=await response.json();if(!response.ok)throw new Error(value.error);
+ if(chatId!==state.active_chat)throw new Error(tr('Sohbet değişti; belge gönderilmedi.','The chat changed; the document was not sent.'));
+ pendingDocs.push(value.attachment);drawPending();if(!$('#prompt').value.trim())$('#prompt').value=tr('Bu belgeyi kısaca özetle.','Briefly summarize this document.');$('#prompt').focus();
+}
+function isMedia(f){return /^(image|video)\//.test(f.type)||/\.(jpg|jpeg|png|gif|webp|heic|heif|mp4|mov|m4v|webm)$/i.test(f.name);}
+input.onchange=e=>{const file=input.files?.[0];if(!file)return;if(isMedia(file))oldChange(e);else safe(()=>upload(file));};
+// Capture document drops before the older media-only drop handler.
+$('#composer').addEventListener('drop',e=>{const f=e.dataTransfer?.files?.[0];if(f&&!isMedia(f)){e.preventDefault();e.stopImmediatePropagation();safe(()=>upload(f));}},true);
+const oldApi=api;api=async function(action,data={}){if(action==='converse'&&pendingDocs.length)data={...data,docs:pendingDocs.map(d=>d.id)};const value=await oldApi(action,data);if(action==='converse'||action==='new-chat'||action==='select-chat'){pendingDocs=[];drawPending();}return value;};
+let pendingChat=null;
+async function preview(a){
+ const url=a.src||'/attachment/'+encodeURIComponent(a.id);modal(a.name,`<div class="attachment-preview"></div>`);$('#dialog').classList.add('attachment-viewer');const box=$('#dialogBody .attachment-preview');
+ if(a.kind==='image'){const image=document.createElement('img');image.src=url;image.alt=a.name;box.append(image);return;}
+ const textButton=document.createElement('button');textButton.className='button';textButton.textContent=tr('Metni göster','Show text');box.append(textButton);
+ let frame;if(a.mime==='application/pdf'){frame=document.createElement('iframe');frame.src=url;frame.title=a.name;box.append(frame);}
+ const pre=document.createElement('pre');pre.className='document-text';box.append(pre);if(frame)pre.hidden=true;
+ async function loadText(){const r=await fetch(url+'?text=1');pre.textContent=r.ok?await r.text():tr('Metin alınamadı.','Text unavailable.');}
+ textButton.onclick=()=>{if(frame){pre.hidden=!pre.hidden;frame.hidden=!pre.hidden;}else pre.hidden=false;};await loadText();
+}
+const thumb=$('#attachedScreenThumb');thumb.tabIndex=0;thumb.setAttribute('role','button');thumb.setAttribute('aria-label',tr('Görseli büyüt','Expand image'));thumb.onclick=()=>{const src=pendingScreenImage||thumb.getAttribute('src');if(src)safe(()=>preview({name:tr('Gönderilecek görsel','Image to send'),kind:'image',src}));};thumb.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();thumb.click();}};
+const render=renderWorkspace;renderWorkspace=function(){render();if(pendingChat!==state.active_chat){pendingChat=state.active_chat;pendingDocs=[];drawPending();}
+ const messages=state.messages.filter(m=>(m.channel||'common')===$('#channel').value);document.querySelectorAll('#messages .message').forEach((row,i)=>{const m=messages[i];if(!m?.attachments?.length||row.querySelector('.message-attachments'))return;const area=document.createElement('div');area.className='message-attachments';for(const a of m.attachments){const b=document.createElement('button');b.type='button';b.className=a.kind==='image'?'attachment-thumbnail':'attachment-chip';b.setAttribute('aria-label',tr('Eki aç: ','Open attachment: ')+a.name);if(a.kind==='image'){const image=document.createElement('img');image.src='/attachment/'+a.id;image.alt=a.name;image.loading='lazy';b.append(image);}else b.textContent='📄 '+a.name+' · '+Math.ceil(a.size/1024)+' KB';b.onclick=()=>safe(()=>preview(a));area.append(b);}row.querySelector('.message-content')?.prepend(area);});
+ // JARVIS and EDITH share the Google pool; own Claude Pro is distinct from Antigravity 3p.
+ const jarvis=document.querySelector('.agent.jarvis .agent-quota');if(jarvis&&state.jarvis_connector==='gemini'){jarvis.innerHTML=usageMarkup('EDITH');const u=state.provider_usage?.EDITH;if(u?.status==='live')jarvis.closest('.agent').querySelector('.agent-summary').textContent=shortQuotaText(u,'Google');}
+ const vision=document.querySelector('.agent[data-agent="VISION"]');document.querySelectorAll('.agent').forEach(card=>{const a=state.agents.find(a=>a.name===card.querySelector('h2')?.textContent);if(a?.connector==='claude_code'){const el=card.querySelector('.agent-quota');if(el){el.innerHTML=usageMarkup('CLAUDE_PRO');const cu=state.provider_usage?.CLAUDE_PRO;if(cu?.status==='live')el.title=(cu.scope||'Claude Pro')+' · '+(cu.checked_at?new Date(cu.checked_at*1000).toLocaleString():'');else el.title=cu?.message||tr('Saatte bir /usage denenir.','Checks /usage hourly.');}const summary=card.querySelector('.agent-summary'),u=state.provider_usage?.CLAUDE_PRO;if(summary&&u?.status==='live')summary.textContent=shortQuotaText(u,'Claude Pro');}});
+};
+const main=document.createElement('div');main.className='tools-main';const advanced=document.createElement('details');advanced.className='tools-advanced';const summary=document.createElement('summary');summary.textContent=tr('Gelişmiş araçlar','Advanced tools');advanced.append(summary);const auto=document.createElement('p');auto.className='tools-auto';auto.textContent=tr('JARVIS isteğine göre araştırır, planlar ve gerekli ajanı çağırır. Bilgisayar kontrolü için ayrıca onay ister.','JARVIS researches, plans and calls the relevant agent for your request. Computer control needs separate approval.');
+const photo=document.createElement('button');photo.className='button';photo.textContent=tr('Fotoğraf / belge ekle','Attach photo / document');photo.onclick=()=>attach.click();main.append(photo,chooseFromChat,$('#shareScreenFromChat'));
+const body=tools.querySelector('.tool-actions');if(body){for(const child of [...body.children])advanced.append(child);body.replaceChildren(main,auto,advanced);}
+// Move explanatory screen and handoff blocks beneath the advanced disclosure too.
+for(const node of [...tools.children])if(!node.classList.contains('panel-head')&&!node.classList.contains('tools-heading')&&node!==body&&!node.contains(body))advanced.append(node);
 })();

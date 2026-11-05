@@ -1,7 +1,7 @@
 """Small stdio MCP server; bounded project actions stay in the JARVIS approval host."""
-import json,os,sys,urllib.request
+import json,os,sys,urllib.request,urllib.error
 from project_bridge import TOOLS
-ALLOWED={t['name']:t for t in TOOLS if t['name'] in ('project_list','project_read','project_edit') and os.environ.get('JARVIS_PROJECT_TOOLS','1')=='1'}
+ALLOWED={t['name']:t for t in TOOLS if t['name'] in ('project_list','project_read','project_edit','project_patch','project_search','project_note','project_skill','project_browser','project_progress','project_command','project_open_editor') and os.environ.get('JARVIS_PROJECT_TOOLS','1')=='1'}
 if os.environ.get('JARVIS_DESKTOP_TOOLS')=='1':
     from desktop_bridge import TOOLS as DESKTOP_TOOLS
     ALLOWED.update({t['name']:t for t in DESKTOP_TOOLS})
@@ -17,7 +17,13 @@ def process(request):
         if not endpoint.startswith('http://127.0.0.1:') or not endpoint.endswith('/claude-tool'):raise ValueError('Geçersiz yerel araç adresi.')
         data=json.dumps({'tool':params['name'],'arguments':params.get('arguments',{})}).encode()
         req=urllib.request.Request(endpoint,data=data,headers={'Content-Type':'application/json','X-Jarvis-Project-Token':os.environ['JARVIS_CLAUDE_TOOL_TOKEN']})
-        with urllib.request.urlopen(req,timeout=620) as response:value=json.load(response)
+        try:
+            with urllib.request.urlopen(req,timeout=620) as response:value=json.load(response)
+        except urllib.error.HTTPError as error:
+            # the host answers a refused or failed action with 400 and the reason in the body; the agent must read that reason, not just "400 Bad Request"
+            try:body=json.loads(error.read() or b'{}')
+            except ValueError:body={}
+            value={'error':str((body.get('error') if isinstance(body,dict) else '') or error)[:500]}
         image=value.pop('image',None)
         content=[{'type':'text','text':json.dumps(value,ensure_ascii=False)}]
         if image:content.append({'type':'image','mimeType':'image/jpeg','data':image.split(',',1)[1]})

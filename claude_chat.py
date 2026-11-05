@@ -18,6 +18,13 @@ def status():
         return {'installed':True,'signed_in':bool(value.get('loggedIn')) and value.get('authMethod')=='claude.ai','auth_method':value.get('authMethod','none'),'plan':value.get('subscriptionType') or 'unknown'}
     except Exception:return {'installed':True,'signed_in':False,'error':'Claude oturumu okunamadı.'}
 
+def turn_budget(effort,project,desktop):
+    # Real project work needs more than a handful of tool turns (read, search, patch, test, fix).
+    base={'low':16,'medium':28,'high':40}.get(effort or 'low',16) if project else 0
+    # A screen task is many small steps (look, open, look, press, look, type, look, answer), so even a short one needs a few more than 8.
+    if desktop:return max(base,24)
+    return base or 1
+
 class ClaudeConversation:
     def __init__(self,directory,delta,cancelled,model='sonnet'):
         self.directory=directory;self.delta=delta;self.cancelled=cancelled;self.model=model;self.process=None
@@ -27,11 +34,11 @@ class ClaudeConversation:
         account=status()
         if not account.get('signed_in'):raise ValueError('Claude Code abonelik girişi gerekli. Ayarlar → Claude hesabı → Giriş yap. API anahtarına geçilmedi.')
         env=environment();env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']='1'
-        args=[binary(),'--restricted','--setting-sources','','--settings',json.dumps({'disableAllHooks':True,'autoMemoryEnabled':False}),'--disable-slash-commands','--no-chrome','--no-session-persistence','--tools','','--permission-prompts','none','--model',self.model,'--effort',self.effort or 'low','--output-format','json','--max-turns','8' if self.tool_endpoint else '1']
+        args=[binary(),'--restricted','--setting-sources','','--settings',json.dumps({'disableAllHooks':True,'autoMemoryEnabled':False}),'--disable-slash-commands','--no-chrome','--no-session-persistence','--tools','','--permission-prompts','none','--model',self.model,'--effort',self.effort or 'low','--output-format','json','--max-turns',str(turn_budget(self.effort,bool(self.tool_endpoint and getattr(self,'project_tools',True)),bool(getattr(self,'desktop_tools',False)))) if self.tool_endpoint else '1']
         if self.tool_endpoint:
             env.update(JARVIS_CLAUDE_TOOL_ENDPOINT=self.tool_endpoint,JARVIS_CLAUDE_TOOL_TOKEN=self.tool_token)
             config={'mcpServers':{'jarvis_project':{'command':sys.executable,'args':['-B',str(Path(__file__).with_name('claude_project_mcp.py'))],'env':{'JARVIS_CLAUDE_TOOL_ENDPOINT':self.tool_endpoint,'JARVIS_CLAUDE_TOOL_TOKEN':self.tool_token,'JARVIS_DESKTOP_TOOLS':'1' if getattr(self,'desktop_tools',False) else '0','JARVIS_PROJECT_TOOLS':'1' if getattr(self,'project_tools',True) else '0'}}}}
-            args+=['--strict-mcp-config','--mcp-config',json.dumps(config),'--allowedTools',','.join('mcp__jarvis_project__'+name for name in ((['project_list','project_read','project_edit'] if getattr(self,'project_tools',True) else [])+(['desktop_observe','desktop_click','desktop_type','desktop_key','desktop_scroll','desktop_open_url'] if getattr(self,'desktop_tools',False) else [])))]
+            args+=['--strict-mcp-config','--mcp-config',json.dumps(config),'--allowedTools',','.join('mcp__jarvis_project__'+name for name in ((['project_list','project_read','project_edit','project_patch','project_search','project_note','project_skill','project_browser','project_progress','project_command','project_open_editor'] if getattr(self,'project_tools',True) else [])+(['desktop_observe','desktop_move','desktop_click','desktop_type','desktop_key','desktop_scroll','desktop_open_url','desktop_open_app'] if getattr(self,'desktop_tools',False) else [])))]
         else:args+=['--safe-mode','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--disallowedTools','*']
         args+=['-p',prompt]
         self.process=subprocess.Popen(args,cwd=self.directory,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
@@ -48,7 +55,10 @@ class ClaudeConversation:
                 elif self.process.poll() is not None:break
             try:value=json.loads(data)
             except ValueError:raise ValueError('Claude yanıtı alınamadı. Resmî oturumu kontrol et; API anahtarına geçilmedi.')
-            if value.get('is_error') or value.get('subtype') not in ('success',None):raise ValueError(str(value.get('result') or value.get('errors') or 'Claude işi tamamlanmadı.')[:700])
+            if value.get('is_error') or value.get('subtype') not in ('success',None):
+                if value.get('subtype')=='error_max_turns' or 'maximum number of turns' in str(value.get('errors','')).lower():
+                    raise ValueError('İşlem adım sınırında durdu; görev tamamlanmadı. Kota harcamamak için otomatik tekrar yapılmadı. / Action limit reached; task unfinished. No automatic retry.')
+                raise ValueError(str(value.get('result') or value.get('errors') or 'Claude işi tamamlanmadı.')[:700])
             usage=value.get('usage') or {}
             if isinstance(usage.get('input_tokens'),int) and isinstance(usage.get('output_tokens'),int):
                 self.token_usage={'input':usage['input_tokens']+usage.get('cache_read_input_tokens',0)+usage.get('cache_creation_input_tokens',0),'output':usage['output_tokens'],'cached_input':usage.get('cache_read_input_tokens',0)}

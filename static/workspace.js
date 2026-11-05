@@ -1,19 +1,40 @@
 'use strict';
 let briefDirty=false,liveScreenSharing=false,pendingScreenVoice=false;
 let pendingScreenImage=null,lastScreenImage=null,screenToAttach=null,knownModelMessages=null,sharedSignature='',voicePaused=false;
+// Voice room text follows the language you speak (last detected), not the interface language.
+let spokenLang='';try{spokenLang=localStorage.getItem('jarvis-speech-lang')||'';}catch(error){}
+const voiceEnglish=()=>(spokenLang||(typeof state!=='undefined'&&state?.language)||'tr')==='en';
+const vt=(trText,enText)=>voiceEnglish()?enText:trText;
+let autoDetecting=false,quietRestarts=0;
+function paintVoiceRoomLabels(){
+ $('#voiceRoom').setAttribute('aria-label',vt('Canlı sesli konuşma','Live voice conversation'));
+ $('#closeVoiceRoom').textContent=vt('Konuşmayı bitir ×','End conversation ×');
+ $('#voiceInterrupt').textContent=vt('◉ Söz al / JARVIS’i sustur','◉ Interrupt / speak now');
+ $('#voiceMute').textContent=voicePaused?vt('Mikrofonu aç','Resume microphone'):vt('Mikrofonu duraklat','Pause microphone');
+ const micro=document.querySelector('#voiceRoom .micro');if(micro)micro.textContent=vt('SIRAYLA DİNLEME VE KONUŞMA · SES GERİ DÖNGÜSÜNE KARŞI YANIT SIRASINDA DİNLEME DURUR','TAKING TURNS · LISTENING PAUSES WHILE JARVIS SPEAKS TO AVOID AUDIO FEEDBACK');
+}
+// Collapsed agent cards: the 5-hour window comes first when the provider reports it; otherwise the window it does report is named.
+function shortQuotaText(u,pool){
+ const rows=[u?.primary,u?.secondary].filter(w=>w&&typeof w.used_percent==='number'&&w.used_percent>=0&&w.used_percent<=100);
+ const five=rows.find(w=>w.minutes===300),w=five||rows[0];
+ if(!w)return '';
+ return Math.round(100-w.used_percent)+'% ('+(five?tr('5 sa','5h'):w.minutes===10080?tr('haftalık','weekly'):w.minutes===1440?tr('günlük','daily'):tr('kota','quota'))+') · '+pool;
+}
 const quotaLabel=mins=>mins===10080?'Haftalık':mins===1440?'Günlük':mins%60===0?(mins/60)+' saatlik':mins?mins+' dk':'Kota';
 function usageMarkup(agent){
  const value=(state.provider_usage||{})[agent];
- if(['FRIDAY','EDITH','VISION'].includes(agent)&&value&&value.status==='live'){
+ if(['FRIDAY','EDITH','VISION','CLAUDE_PRO'].includes(agent)&&value&&value.status==='live'){
   const rows=[value.primary,value.secondary].filter(Boolean).map(w=>{
    const valid=typeof w.used_percent==='number'&&w.used_percent>=0&&w.used_percent<=100;
    const remaining=valid?Math.round(100-w.used_percent):null;
    const reset=w.resets_at?new Date(w.resets_at*1000).toLocaleString('tr-TR'):'';
-   return `<div class="quota-row" title="${esc(reset?'Yenilenme: '+reset:'Resmi kaynak yenileme saati döndürmedi')}"><span>${esc(quotaLabel(w.minutes))}</span><progress max="100" value="${remaining===null?0:remaining}" aria-label="${esc(quotaLabel(w.minutes))} kalan kota"></progress><b>${remaining===null?'?':remaining+'%'}</b></div>`;
+   return `<div class="quota-row" data-quota-period="${w.minutes===10080?'week':'window'}" title="${esc(reset?'Yenilenme: '+reset:'Resmi kaynak yenileme saati döndürmedi')}"><span>${esc(quotaLabel(w.minutes))}</span><progress max="100" value="${remaining===null?0:remaining}" aria-label="${esc(quotaLabel(w.minutes))} kalan kota"></progress><b>${remaining===null?'?':remaining+'%'}</b></div>`;
   }).join('');
-  return rows+`<small class="quota-source">${agent==='FRIDAY'?'CODEX':'ANTIGRAVITY'} · ${esc(value.plan||'')} · ${esc(new Date(value.checked_at*1000).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}))}</small>`;
+  const shortMissing=['EDITH','VISION'].includes(agent)&&![value.primary,value.secondary].some(w=>w?.minutes===300)?'<div class="quota-row quota-unavailable" title="'+esc(tr('Antigravity’nin resmi /usage çıktısı bu hesapta yalnızca haftalık sınır bildiriyor; 5 saatlik pencere verilmiyor.','Antigravity’s official /usage output reports only a weekly limit for this account; no 5-hour window is given.'))+'"><span>'+esc(tr('5 saatlik','5-hour'))+'</span><b>'+esc(tr('Bildirilmiyor','Not reported'))+'</b></div>':'';
+  return shortMissing+rows+`<small class="quota-source">${agent==='FRIDAY'?'CODEX':agent==='CLAUDE_PRO'?'CLAUDE PRO · /usage':'GOOGLE · ANTIGRAVITY'} · ${esc(value.plan||'')} · ${esc(new Date(value.checked_at*1000).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}))}</small>`;
  }
- if(agent==='JARVIS')return '<div class="quota-local">Python koordinatörü <b>API $0</b></div><small class="quota-source">SOHBET: YEREL / CODEX SEÇİLEBİLİR</small>';
+ if(agent==='CLAUDE_PRO')return '<div class="quota-local">Claude Pro <b>'+tr('Bilinmiyor','Unknown')+'</b></div><small class="quota-source">/usage · '+tr('Saatlik sorgu · okunamadı','Hourly check · unavailable')+'</small>';
+ if(agent==='JARVIS')return '<div class="quota-local">Koordinatör <b>JARVIS</b></div><small class="quota-source">SEÇİLİ SOHBET BAĞLANTISI</small>';
  if((agent==='EDITH'&&state.google_status?.verified)||(agent==='VISION'&&state.google_status?.claude_verified))return '<div class="quota-local">Antigravity <b>Bağlı</b></div><small class="quota-source">KALAN KOTA SAĞLANMIYOR</small>';
  if(agent==='EDITH')return '<div class="quota-local">Kalan kota <b>Bilinmiyor</b></div><small class="quota-source">ANTIGRAVITY · BAĞLANTI HENÜZ YOK</small>';
  return `<div class="quota-local">Kalan kota <b>Bilinmiyor</b></div><small class="quota-source">${value&&value.status==='error'?'SON SORGU BAŞARISIZ · YENİLE':'MANUEL BAĞLANTI'}</small>`;
@@ -26,7 +47,7 @@ function renderWorkspace(){
   if((m.model||m.provider==='rules')&&m.status!=='streaming'&&!knownModelMessages.has(m.id)){
    knownModelMessages.add(m.id);
    if((m.channel||'common')===$('#channel').value){
-    if(m.status==='done'||m.provider==='rules')window.dispatchEvent(new CustomEvent('jarvis-reply',{detail:{channel:m.channel||'common',message:m}}));
+    if((m.status==='done'||m.provider==='rules')&&!m.joined&&!m.finished&&!m.voice_hold)window.dispatchEvent(new CustomEvent('jarvis-reply',{detail:{channel:m.channel||'common',message:m}}));
     else window.dispatchEvent(new Event('jarvis-send-error'));
    }
   }
@@ -45,7 +66,7 @@ function renderWorkspace(){
  $('#stopModel').classList.toggle('hidden',!state.model_job);
  const selected=$('#channel').value;
  if(['common','FRIDAY','EDITH','VISION'].includes(selected))$('#directTools').classList.add('hidden');
- if(state.model_job&&liveConversation){voiceWaiting=true;$('#voiceRoomPhase').textContent='DÜŞÜNÜYOR';$('#voiceRoomTitle').textContent='Bir saniye, Berke…';}
+ if(state.model_job&&liveConversation){voiceWaiting=true;$('#voiceRoomPhase').textContent=vt('DÜŞÜNÜYOR','THINKING');$('#voiceRoomTitle').textContent=vt('Bir saniye, Berke…','One moment, Berke…');}
  renderSharedMemory();updateReactor();renderProjectAssistant();
 }
 function renderSharedMemory(){
@@ -98,10 +119,15 @@ window.addEventListener('jarvis-native',e=>{
  if(type==='screen')lastScreenImage=data.image;
  if(type==='screen-stopped'||type==='screen-error')lastScreenImage=null;
  if(type==='screen-attachment-approved'&&screenToAttach){pendingScreenImage=screenToAttach;screenToAttach=null;$('#attachedScreenThumb').src=pendingScreenImage;$('#attachedScreen').classList.remove('hidden');$('#channel').value='common';$('#channel').dispatchEvent(new Event('change'));$('#prompt').value=$('#screenQuestion').value.trim()||'Bu ekran karesini incele ve ne gördüğünü açıkla.';safe(()=>view('mission'));$('#prompt').focus();}
- if(type==='transcript'&&liveConversation){$('#voiceRoomTranscript').textContent=data.text;}
+ if(type==='transcript'&&liveConversation){quietRestarts=0;$('#voiceRoomTranscript').textContent=data.text;$('#voiceRoomTranscript').classList.toggle('provisional',autoDetecting&&!data.final);if(autoDetecting&&!data.final)$('#voiceRoomPhase').textContent=vt('DİL ALGILANIYOR','DETECTING LANGUAGE');}
+ if(type==='speech-detected'){spokenLang=String(data.locale||'').startsWith('tr')?'tr':'en';try{localStorage.setItem('jarvis-speech-lang',spokenLang);}catch(error){}autoDetecting=false;$('#voiceRoomTranscript').classList.remove('provisional');paintVoiceRoomLabels();if(liveConversation)voiceRoomState(nativeListening?'listening':'ready');}
  if(type==='speaking'){voiceRoomState(data.active?'speaking':nativeListening?'listening':'ready');}
- if(type==='listening'){voiceRoomState(data.active?'listening':voiceWaiting?'thinking':'ready');}
- if(type==='voice-error'){$('#voiceRoomTitle').textContent='Ses bağlantısı durdu.';$('#voiceRoomTranscript').textContent=data.message;}
+ if(type==='listening'){autoDetecting=Boolean(data.active&&data.auto);voiceRoomState(data.active?'listening':voiceWaiting?'thinking':'ready');}
+ if(type==='voice-error'){
+  // "No speech detected" is not a failure while the room is open: keep listening for your voice, no button press needed.
+  if(liveConversation&&!voicePaused&&noSpeechError(data.message)&&quietRestarts<40){quietRestarts++;voiceRoomState('listening');setTimeout(()=>{if(liveConversation&&!voicePaused)resumeListening();},450);return;}
+  $('#voiceRoomTitle').textContent=vt('Ses bağlantısı durdu.','Voice connection stopped.');$('#voiceRoomTranscript').textContent=data.message;
+ }
 });
 $('#screenToChat').onclick=()=>{if(!lastScreenImage){toast('Önce ekran önizlemesini aç.');return;}if(!state.live_chat||!state.integrations_enabled){toast('Görseli yorumlamak için gerçek Codex sohbetini aç.');return;}screenToAttach=lastScreenImage;nativeSend('approve-screen-attachment');};
 function clearScreenAttachment(){pendingScreenImage=null;$('#attachedScreenThumb').removeAttribute('src');$('#attachedScreen').classList.add('hidden');}
@@ -109,7 +135,8 @@ $('#removeScreen').onclick=clearScreenAttachment;
 // Voice room: automatic turn submission; dictation remains a separate secondary action.
 function voiceRoomState(phase){
  $('#voiceRoom').dataset.phase=phase;
- const states={listening:['DİNLİYORUM','Seni dinliyorum, Berke.'],speaking:['JARVIS KONUŞUYOR','Birlikte düşünelim.'],thinking:['DÜŞÜNÜYOR','Bir saniye, Berke…'],ready:['HAZIR','Buradayım, Berke.']};
+ const states={listening:[vt('DİNLİYORUM','LISTENING'),vt('Seni dinliyorum, Berke.','I am listening, Berke.')],speaking:[vt('JARVIS KONUŞUYOR','JARVIS IS SPEAKING'),vt('Birlikte düşünelim.','Let’s think together.')],thinking:[vt('DÜŞÜNÜYOR','THINKING'),vt('Bir saniye, Berke…','One moment, Berke…')],ready:[vt('HAZIR','READY'),vt('Buradayım, Berke.','I am here, Berke.')]};
+ paintVoiceRoomLabels();
  $('#voiceRoomPhase').textContent=states[phase][0];$('#voiceRoomTitle').textContent=states[phase][1];
 }
 let voiceBeforeRoom=false;
@@ -117,14 +144,14 @@ function startVoiceRoom(){
  voiceBeforeRoom=voiceEnabled;
  if(!nativeHost){nativeSend('listen');return;}
  liveConversation=true;voicePaused=false;voiceEnabled=true;voiceWaiting=false;$('#messageMode').value='converse';$('#owner').disabled=true;
- $('#voiceRoom').classList.remove('hidden');$('#voiceRoomTranscript').textContent='Cümleni bitirdiğinde otomatik gönderilir. Enter’a gerek yok.';voiceRoomState('listening');sound();
+ $('#voiceRoom').classList.remove('hidden');quietRestarts=0;$('#voiceRoomTranscript').textContent=vt('Cümleni bitirdiğinde otomatik gönderilir. Enter’a gerek yok.','It is sent automatically when you finish your sentence. No Enter needed.');voiceRoomState('listening');sound();
  nativeSend('stop-speech');nativeSpeaking=false;nativeSend('listen');setVoiceState('CANLI SESLİ KONUŞMA');
 }
 function stopVoiceRoom(){voiceEnabled=voiceBeforeRoom;if(liveScreenSharing)stopLiveScreenSharing();liveConversation=false;voiceWaiting=false;voicePaused=false;nativeSend('stop-listening');nativeSend('stop-speech');$('#voiceRoom').classList.add('hidden');setVoiceState('KONUŞMA BİTTİ');}
 $('#micButton').onclick=startVoiceRoom;$('#liveVoice').onclick=startVoiceRoom;$('#closeVoiceRoom').onclick=stopVoiceRoom;
 $('#dictationButton').onclick=()=>{liveConversation=false;nativeSend('stop-speech');nativeSend('listen');setVoiceState('DİKTE · YALNIZCA YAZIYA ÇEVİRME');};
 $('#voiceInterrupt').onclick=()=>{if(state.model_job)safe(()=>api('stop-model'));voiceWaiting=false;nativeSend('stop-speech');nativeSpeaking=false;if(nativeListening)nativeSend('stop-listening');liveConversation=true;nativeSend('listen');voiceRoomState('listening');};
-$('#voiceMute').onclick=()=>{voicePaused=!voicePaused;if(voicePaused){liveConversation=false;nativeSend('stop-listening');$('#voiceMute').textContent='Mikrofonu aç';$('#voiceRoomPhase').textContent='DURAKLATILDI';}else{liveConversation=true;$('#voiceMute').textContent='Mikrofonu duraklat';resumeListening();}};
+$('#voiceMute').onclick=()=>{voicePaused=!voicePaused;if(voicePaused){liveConversation=false;nativeSend('stop-listening');paintVoiceRoomLabels();$('#voiceRoomPhase').textContent=vt('DURAKLATILDI','PAUSED');}else{liveConversation=true;paintVoiceRoomLabels();resumeListening();}};
 window.addEventListener('jarvis-send-error',()=>{voiceWaiting=false;if(liveConversation)resumeListening();});
 window.addEventListener('jarvis-reply',e=>{if(liveConversation)$('#voiceRoomTranscript').textContent=e.detail.message.text;});
 // An in-project assistant uses the same FRIDAY channel and shared context.

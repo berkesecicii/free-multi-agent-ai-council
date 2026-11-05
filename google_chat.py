@@ -70,7 +70,7 @@ class GoogleConversation:
         if getattr(self,'effort',None):args[1:1]=['--effort',self.effort]
         self.process=subprocess.Popen(args,cwd=self.directory,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
         selector=selectors.DefaultSelector();selector.register(self.process.stdout,selectors.EVENT_READ)
-        output=bytearray();deadline=time.monotonic()+100
+        output=bytearray();event_buffer=bytearray();seen_tools=set();deadline=time.monotonic()+100
         try:
             while True:
                 if self.cancelled.is_set():raise ValueError('Antigravity yanıtı durduruldu.')
@@ -79,6 +79,17 @@ class GoogleConversation:
                     chunk=os.read(self.process.stdout.fileno(),65536)
                     if not chunk:break
                     output.extend(chunk)
+                    if stream:
+                        event_buffer.extend(chunk)
+                        while b'\n' in event_buffer:
+                            line,_,rest=event_buffer.partition(b'\n');event_buffer=bytearray(rest)
+                            try:event=json.loads(line)
+                            except ValueError:continue
+                            step=event.get('step_update') or {}
+                            signature=(step.get('step_index'),step.get('state'),step.get('tool_name'))
+                            if step.get('step_type')=='tool' and step.get('state') in ('ACTIVE','RUNNING','DONE') and signature not in seen_tools:
+                                seen_tools.add(signature)
+                                if getattr(self,'activity',None):self.activity(step.get('tool_name','web'),json.dumps(dict(state=step.get('state'),parameters=(step.get('tool_info') or {}).get('parameters',{})),ensure_ascii=False)[:1000])
                     if len(output)>2000000:raise ValueError('Antigravity yanıt boyutu sınırı aşıldı.')
                 elif self.process.poll() is not None:break
             try:
@@ -91,7 +102,7 @@ class GoogleConversation:
                         step=event.get('step_update') or {}
                         if step.get('step_type')=='tool' and step.get('state')=='DONE':
                             self.tools_used.append(step.get('tool_name','tool'))
-                            if getattr(self,'activity',None):self.activity(step.get('tool_name','web'),str((step.get('tool_info') or {}).get('parameters',{}))[:400])
+
                 else:value=json.loads(output)
             except ValueError:raise ValueError('Antigravity yanıtı alınamadı. Resmi uygulamadaki oturumunu kontrol et; API anahtarına geçilmedi.')
             if value.get('status')!='SUCCESS':raise ValueError('Antigravity görevi tamamlanamadı. Resmi oturum/kota durumunu kontrol et; başka modele geçilmedi.')

@@ -68,6 +68,6 @@ window.addEventListener('jarvis-native',e=>{if(e.detail.type==='voice-fallback')
 $('.personal-preferences>p').textContent='Doğal kadın sesi: Supertonic 3 · Türkçe / English · tamamen Mac’inde · API kotası kullanmaz. macOS ses seçimi yalnızca yedek motor içindir.';
 $('#settings>.panel-head>.pill').textContent='v0.5.0';
 
-voiceEnabled=localStorage.getItem('jarvis-spoken-replies')!=='off';setVoiceState('HAZIR');$('#speakerButton').addEventListener('click',()=>localStorage.setItem('jarvis-spoken-replies',voiceEnabled?'on':'off'));
+voiceEnabled=localStorage.getItem('jarvis-spoken-replies')!=='off';setVoiceState('HAZIR');
 
 const agentSettings=document.createElement('section');agentSettings.className='agent-management';const agentSettingsHead=document.createElement('div');agentSettingsHead.className='small-heading';agentSettingsHead.innerHTML='<h3>Ajanlar</h3>';agentSettingsHead.append($('#addAgent'));agentSettings.append(agentSettingsHead,$('#agentRegistry'));$('#settings .connection-panel').prepend(agentSettings);

@@ -2,12 +2,13 @@
 const $ = s => document.querySelector(s);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let displayedChat=null,refreshSequence=0,pollTimer;
+const renderMetrics={count:0,lastMs:0,maxMs:0,reusedRows:0};
 let state, currentView = 'mission', currentFile = 'research.md', timer, lastMessages = '', busy = false;
 const statusNames = {review:'İnceleme bekliyor',queued:'Sırada',working:'Çalışılıyor',done:'Tamamlandı',cancelled:'İptal',pending:'Onay bekliyor',rejected:'Reddedildi',expired:'Süresi doldu',failed:'Başarısız',interrupted:'Kesildi',running:'Çalışıyor'};
 function toast(text) { $('#toast').textContent=text; $('#toast').classList.add('show'); clearTimeout(timer);timer=setTimeout(()=>$('#toast').classList.remove('show'),4200); }
 async function api(action, data={}) {
   const response=await fetch('/api/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis-Token':state.csrf},body:JSON.stringify({chat_id:state.active_chat,...data})});
-  const result=await response.json(); if(!response.ok) throw new Error(result.error || 'İşlem başarısız.');
+  const result=await response.json(); if(!response.ok){if(String(result.error||'').includes('macOS Ekran Kaydı'))await refresh();throw new Error(result.error || 'İşlem başarısız.');}
   await refresh();schedulePoll();return result;
 }
 async function safe(work) {try {await work();} catch(error){toast(error.message);}}
@@ -19,18 +20,30 @@ async function refresh(){
  $('#connection').textContent='SİSTEM ÇEVRİMİÇİ';render();
 }
 function render(){
+ const renderStarted=performance.now();
  if(typeof syncAgents==='function')syncAgents();
  for(const name of ['FRIDAY','EDITH','VISION'])$('#count-'+name).textContent=state.tasks.filter(t=>t.owner===name&&['queued','working','review'].includes(t.status)).length+' aktif görev';
  $('#cacheMetric').textContent=state.cache_hits;
  const channel=$('#channel').value;const visibleMessages=state.messages.filter(m=>(m.channel||'common')===channel);const signature=channel+JSON.stringify(visibleMessages);
  if(signature!==lastMessages){
   const nearBottom=$('#messages').scrollHeight-$('#messages').scrollTop-$('#messages').clientHeight<70;
-  lastMessages=signature;$('#messages').innerHTML='<div class="welcome">'+(state.integrations_enabled&&state.live_chat?(state.chat_mode==='codex'?'CODEX / CHATGPT ABONELİĞİ · GERÇEK SOHBET':state.chat_mode==='local'?'YEREL QWEN · BULUT KOTASI YOK':'JARVIS · EKONOMİK YÖNLENDİRME'):'YEREL NOT MODU · MODEL KAPALI')+'</div>'+visibleMessages.map(m=>`<article class="message ${m.author==='YOU'?'you':''}"><div class="message-avatar">${esc(m.author[0])}</div><div class="message-content"><div class="message-meta">${esc(m.author)}${m.model?'<span class="model-label">'+({local:'LOCAL',codex:'CODEX',gemini:'GEMINI',claude_google:'CLAUDE'}[m.provider]||'MODEL')+'</span>':''}${m.status==='streaming'?'<span class="stream-label">YANITLIYOR…</span>':''}<time>${esc(m.time)}</time></div><div class="message-text">${esc(m.text)}</div></div></article>`).join('')+(state.tasks.length===0&&channel==='common'?'<div class="suggestions"><button data-example="Mac için not uygulaması geliştir">⌘ Bir uygulama geliştir</button><button data-example="Yerel veri saklama seçeneklerini araştır">✧ Araştırma başlat</button><button data-example="MVP güvenliğini incele">◈ İkinci görüş al</button></div>':'');
+  lastMessages=signature;
+  const host=$('#messages'), retained=new Map(Array.from(host.querySelectorAll(':scope > .message[data-message-id]'),el=>[el.dataset.messageId,el]));
+  const nextHTML='<div class="welcome">'+(state.integrations_enabled&&state.live_chat?(state.chat_mode==='codex'?'CODEX / CHATGPT ABONELİĞİ · GERÇEK SOHBET':state.chat_mode==='local'?'YEREL QWEN · BULUT KOTASI YOK':'JARVIS · EKONOMİK YÖNLENDİRME'):'YEREL NOT MODU · MODEL KAPALI')+'</div>'+visibleMessages.map(m=>`<article class="message ${m.author==='YOU'?'you':''}"><div class="message-avatar">${esc(m.author[0])}</div><div class="message-content"><div class="message-meta">${esc(m.author)}${m.model?'<span class="model-label">'+({local:'LOCAL',codex:'CODEX',gemini:'GEMINI',claude_google:'CLAUDE'}[m.provider]||'MODEL')+'</span>':''}${m.status==='streaming'?'<span class="stream-label">YANITLIYOR…</span>':''}<time>${esc(m.time)}</time></div><div class="message-text">${esc(m.text)}</div></div></article>`).join('')+(state.tasks.length===0&&channel==='common'?'<div class="suggestions"><button data-example="Mac için not uygulaması geliştir">⌘ Bir uygulama geliştir</button><button data-example="Yerel veri saklama seçeneklerini araştır">✧ Araştırma başlat</button><button data-example="MVP güvenliğini incele">◈ İkinci görüş al</button></div>':'');
+  const fragment=document.createElement('template');fragment.innerHTML=nextHTML;
+  Array.from(fragment.content.querySelectorAll('.message')).forEach((row,i)=>{
+   const m=visibleMessages[i],key=String(m.id),sig=JSON.stringify(m),prior=retained.get(key);
+   if(prior&&prior.dataset.recordSignature===sig){row.replaceWith(prior);renderMetrics.reusedRows++;}
+   else{row.dataset.messageId=key;row.dataset.recordSignature=sig;}
+  });
+  host.replaceChildren(fragment.content);
   if(nearBottom)$('#messages').scrollTop=$('#messages').scrollHeight;
  }
  renderTasks();renderCommands();
  if(typeof renderWorkspace==='function')renderWorkspace();
  $('#handoffUsage').textContent=`BUGÜN: ${state.usage.handoffs} / ${state.settings.daily_handoffs} MANUEL PAKET · GERÇEK SAĞLAYICI KOTASI ÖLÇÜLMEZ`;
+ renderMetrics.count++;renderMetrics.lastMs=performance.now()-renderStarted;renderMetrics.maxMs=Math.max(renderMetrics.maxMs,renderMetrics.lastMs);
+ $('#messages').dataset.renderMs=renderMetrics.lastMs.toFixed(2);$('#messages').dataset.reusedRows=String(renderMetrics.reusedRows);
 }
 function renderTasks(){
  const filter=$('#taskFilter').value;const tasks=state.tasks.filter(t=>!t.archived&&(filter==='all'||(filter==='active'?['queued','working','review'].includes(t.status):t.status===filter)));

@@ -2,8 +2,11 @@
 set -eu
 PROJECT_DIR="${0:A:h:h}"
 OUTPUT_APP="$PROJECT_DIR/../JARVIS.app"
-mkdir -p "$OUTPUT_APP/Contents/MacOS" "$OUTPUT_APP/Contents/Resources/server/static" "$PROJECT_DIR/../../work/swift-cache"
-cp "$PROJECT_DIR/app.py" "$PROJECT_DIR/adapters.py" "$PROJECT_DIR/providers.py" "$PROJECT_DIR/codex_chat.py" "$PROJECT_DIR/local_chat.py" "$PROJECT_DIR/google_chat.py" "$PROJECT_DIR/memory_guard.py" "$PROJECT_DIR/free_chat.py" "$PROJECT_DIR/model_catalog.py" "$PROJECT_DIR/project_bridge.py" "$PROJECT_DIR/team_runner.py" "$PROJECT_DIR/claude_chat.py" "$PROJECT_DIR/claude_project_mcp.py" "$PROJECT_DIR/desktop_bridge.py" "$PROJECT_DIR/model-catalog.json" "$OUTPUT_APP/Contents/Resources/server/"
+SWIFT_CACHE="${PROJECT_DIR}/../../work/swift-cache-v2"
+SWIFT_CACHE="${SWIFT_CACHE:A}"
+mkdir -p "$OUTPUT_APP/Contents/MacOS" "$OUTPUT_APP/Contents/Resources/server/static" "$SWIFT_CACHE"
+cp "$PROJECT_DIR/chat_workflow.py" "$PROJECT_DIR/scheduler.py" "$PROJECT_DIR/claude_usage.py" "$PROJECT_DIR/documents.py" "$PROJECT_DIR/app.py" "$PROJECT_DIR/adapters.py" "$PROJECT_DIR/providers.py" "$PROJECT_DIR/codex_chat.py" "$PROJECT_DIR/local_chat.py" "$PROJECT_DIR/google_chat.py" "$PROJECT_DIR/memory_guard.py" "$PROJECT_DIR/free_chat.py" "$PROJECT_DIR/model_catalog.py" "$PROJECT_DIR/project_bridge.py" "$PROJECT_DIR/team_runner.py" "$PROJECT_DIR/claude_chat.py" "$PROJECT_DIR/claude_project_mcp.py" "$PROJECT_DIR/desktop_bridge.py" "$PROJECT_DIR/model-catalog.json" "$OUTPUT_APP/Contents/Resources/server/"
+xcrun swiftc "$PROJECT_DIR/native/pdftext.swift" -o "$OUTPUT_APP/Contents/Resources/pdftext"
 cp "$PROJECT_DIR/static/"* "$OUTPUT_APP/Contents/Resources/server/static/"
 cp "$PROJECT_DIR/native/ui-en.json" "$OUTPUT_APP/Contents/Resources/ui-en.json"
 cp "$PROJECT_DIR/native/Jarvis.icns" "$OUTPUT_APP/Contents/Resources/Jarvis.icns"
@@ -22,6 +25,10 @@ import sys
 for file in (Path(sys.argv[1])/'Contents/Resources/ollama').rglob('._*'):
     if file.is_file():file.unlink()
 CLEAN
+# Voice presets the runtime does not have yet (JARVIS/VISION/FRIDAY/EDITH/NOVA/KAREN each use their own). Failure is not fatal.
+if [ -d "$PROJECT_DIR/../../work/v0.5/supertonic/voice_styles" ]; then
+  python3 "$PROJECT_DIR/native/fetch_voice_styles.py" "$PROJECT_DIR/../../work/v0.5/supertonic/voice_styles" > "$PROJECT_DIR/TAKIM/ses-indirme.txt" 2>&1 || true
+fi
 if [ -d "$PROJECT_DIR/../../work/v0.5/voice-runtime" ]; then
   mkdir -p "$OUTPUT_APP/Contents/Resources/voice-runtime"
   cp -R "$PROJECT_DIR/../../work/v0.5/voice-runtime/" "$OUTPUT_APP/Contents/Resources/voice-runtime/"
@@ -30,6 +37,7 @@ if [ -d "$PROJECT_DIR/../../work/v0.5/voice-runtime" ]; then
   cp "$PROJECT_DIR/../../work/v0.5/supertonic/LICENSE" "$OUTPUT_APP/Contents/Resources/voice-runtime/MODEL-LICENSE"
   cp "$PROJECT_DIR/../../work/v0.5/supertonic/CODE-LICENSE" "$OUTPUT_APP/Contents/Resources/voice-runtime/CODE-LICENSE"
   find "$OUTPUT_APP/Contents/Resources/voice-runtime" -type d -name __pycache__ -prune -exec rm -r {} +
+  ls "$OUTPUT_APP/Contents/Resources/voice-runtime/voice_styles" > "$PROJECT_DIR/TAKIM/ses-stilleri.txt" 2>/dev/null || true
 fi
 command -v python3 > "$OUTPUT_APP/Contents/Resources/PythonRuntime.txt"
 cat > "$OUTPUT_APP/Contents/Info.plist" <<'PLIST'
@@ -41,8 +49,8 @@ cat > "$OUTPUT_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.berke.jarvis</string>
 <key>CFBundleName</key><string>JARVIS</string>
 <key>CFBundleDisplayName</key><string>JARVIS</string>
-<key>CFBundleVersion</key><string>74</string>
-<key>CFBundleShortVersionString</key><string>0.7.4</string>
+<key>CFBundleVersion</key><string>76</string>
+<key>CFBundleShortVersionString</key><string>0.7.6</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
@@ -51,7 +59,7 @@ cat > "$OUTPUT_APP/Contents/Info.plist" <<'PLIST'
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
-xcrun swiftc -swift-version 5 -module-cache-path "$PROJECT_DIR/../../work/swift-cache" -framework AppKit -framework WebKit -framework AVFoundation -framework Speech -framework ScreenCaptureKit -framework CryptoKit -target arm64-apple-macos14.0 "$PROJECT_DIR/native/Jarvis.swift" -o "$OUTPUT_APP/Contents/MacOS/JARVIS"
+xcrun swiftc -swift-version 5 -module-cache-path "$SWIFT_CACHE" -framework AppKit -framework WebKit -framework AVFoundation -framework Speech -framework NaturalLanguage -framework ScreenCaptureKit -framework CryptoKit -target arm64-apple-macos14.0 "$PROJECT_DIR/native/Jarvis.swift" -o "$OUTPUT_APP/Contents/MacOS/JARVIS"
 # Sign outside the file-provider-backed Documents folder; its Finder metadata
 # can be reattached during codesign, making an otherwise valid build fail.
 python3 - "$OUTPUT_APP" <<'SIGN'
@@ -61,7 +69,19 @@ app=Path(sys.argv[1]);stage=Path(tempfile.mkdtemp(prefix='jarvis-sign-'))/'JARVI
 shutil.copytree(app,stage,symlinks=True)
 for attr in ('com.apple.ResourceFork','com.apple.FinderInfo'):
     subprocess.run(['xattr','-dr',attr,str(stage)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-subprocess.run(['codesign','--force','--sign','-',str(stage)],check=True)
+# A fixed signing identity (made once with Imza-kur.command) keeps the Mac's Screen Recording and Accessibility permissions across rebuilds;
+# without it the app is signed ad hoc and macOS forgets those permissions after every build.
+identity='-'
+try:
+    found=subprocess.run(['security','find-identity','-v','-p','codesigning'],capture_output=True,text=True).stdout
+    if '"JARVIS Local Signing"' in found:identity='JARVIS Local Signing'
+except Exception:pass
+try:signed=subprocess.run(['codesign','--force','--sign',identity,str(stage)],timeout=120).returncode
+except subprocess.TimeoutExpired:signed=1  # macOS may be waiting for a key-access click that nobody answered
+if signed and identity!='-':
+    print('Sabit imza kullanılamadı (anahtar erişimi reddedilmiş olabilir); ad-hoc imzaya dönülüyor, izinler yeniden verilmeli.')
+    identity='-';subprocess.run(['codesign','--force','--sign','-',str(stage)],check=True)
+print('İmza:',identity if identity!='-' else 'ad-hoc')
 subprocess.run(['codesign','--verify','--deep',str(stage)],check=True)
 shutil.rmtree(app);shutil.move(str(stage),str(app));stage.parent.rmdir()
 SIGN
