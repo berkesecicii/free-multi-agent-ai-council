@@ -221,6 +221,12 @@ class SearchNoteCommandTests(BridgeCase):
         plain=self.bridge.sandbox_profile(network=True);git=self.bridge.sandbox_profile(network=True,git=True)
         self.assertIn('Library/Keychains',plain);self.assertNotIn('Library/Keychains',git)
         for part in ('.ssh','.aws','.gnupg','BerkeJARVIS'):self.assertIn(part,git)
+    def test_sandbox_hides_agent_sign_in_browser_and_history_files(self):
+        plain=self.bridge.sandbox_profile();git=self.bridge.sandbox_profile(network=True,git=True)
+        for profile in (plain,git):
+            for part in ('/.codex','/.claude','/.gemini','Library/Safari','Library/Cookies','Library/Application Support/Google/Chrome','Library/Messages','.zsh_history','.bash_history'):self.assertIn(part,profile,part)
+        for part in ('.netrc','.git-credentials','.config/gh','.config/gcloud','Library/Keychains'):
+            self.assertIn(part,plain,part);self.assertNotIn(part,git,part)
     def test_sandbox_profile_blocks_network_writes_outside_and_secret_folders(self):
         profile=self.bridge.sandbox_profile()
         self.assertIn('(deny network*)',profile);self.assertNotIn('(deny network*)',self.bridge.sandbox_profile(network=True));self.assertIn('com.apple.coreservices.appleevents',profile);self.assertIn(str(self.root),profile);self.assertIn('.ssh',profile);self.assertIn('BerkeJARVIS',profile);self.assertIn('(deny file-write*',profile)

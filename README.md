@@ -132,7 +132,7 @@ VISION and FRIDAY work on a folder you connect, with tools that are sandboxed an
 | `project_patch` | Small, single-hunk patches instead of rewriting files (with approval and backups) |
 | `project_search` | Text search inside the project |
 | `project_note` | A shared project notebook (and a persistent *team* memory, injected into each agent's prompt, capped at 1,200 characters) |
-| `project_command` | Approved commands (tests, `sh`/`bash`/`zsh`, `curl`, `pip`, `find`, `sed`, `awk`, `tar`, `diff`…) inside a **macOS sandbox**: writes only to the project and a temp folder, secret folders (`.ssh`, `.aws`, `.gnupg`, JARVIS's own data) are unreadable, Apple Events are off |
+| `project_command` | Approved commands (tests, `sh`/`bash`/`zsh`, `curl`, `pip`, `find`, `sed`, `awk`, `tar`, `diff`…) inside a **macOS sandbox**: writes only to the project and a temp folder, key folders, the agents' own sign-in folders (`.claude`, `.codex`, `.gemini`), browser and message data, shell history and JARVIS's own data are unreadable, Apple Events are off |
 | `project_skill` | Team playbooks (`web-game`, `project-setup`, `verify`, `debug`, `git-flow`) plus your own Markdown playbooks |
 | `project_browser` | Runs a page the agent just wrote in a **real headless Chromium** (press keys, click, read text/numbers/JS) with the network off |
 

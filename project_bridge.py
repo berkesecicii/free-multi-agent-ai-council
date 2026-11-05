@@ -72,7 +72,10 @@ class ProjectBridge:
         # macOS sandbox-exec profile: no network, writes only inside the project and temp folders, no reading of key and app-data folders.
         root=str(self.root);home=str(Path.home())
         if any(ch in root+home for ch in '"\\'):raise ValueError('Proje yolu komut ortamı için uygun değil.')
-        blocked=' '.join('(subpath "%s/%s")'%(home,part) for part in ('.ssh','.aws','.gnupg','Library/Application Support/BerkeJARVIS')+(() if git else ('Library/Keychains',)))
+        # Always unreadable: key folders, the agents' own sign-in folders, browser/message data and shell history. Without git: also the Keychain and token files (git needs them for its saved sign-in).
+        always=('.ssh','.aws','.gnupg','.codex','.claude','.gemini','.antigravity','Library/Application Support/BerkeJARVIS','Library/Application Support/Claude','Library/Application Support/Google/Chrome','Library/Safari','Library/Cookies','Library/Messages','Library/Mail')
+        blocked=' '.join('(subpath "%s/%s")'%(home,part) for part in always+(() if git else ('Library/Keychains','.config/gh','.config/gcloud')))
+        blocked+=' '+' '.join('(literal "%s/%s")'%(home,name) for name in ('.zsh_history','.bash_history')+(() if git else ('.netrc','.git-credentials')))
         return ('(version 1)(allow default)'+('' if network else '(deny network*)')+'(deny mach-lookup (global-name "com.apple.coreservices.appleevents"))(deny file-read* '+blocked+')'
             '(deny file-write* (require-not (require-any (subpath "'+root+'") (subpath "/private/tmp") (subpath "/private/var/folders") (regex #"^/dev/(null|tty|zero|dtracehelper)$"))))')
     def local_exec(self,argv,timeout=30,network=False,git=False):
