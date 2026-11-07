@@ -1030,6 +1030,13 @@ class DesktopSessionTests(unittest.TestCase):
         # a manual session (every action asked) still shows the typed text on the card and honours a refusal
         asked,sent,result,_=run('Code','desktop_type',{'text':'print(1)'},True,auto=False,target='vscode');self.assertEqual(len(asked),1);self.assertTrue(asked[0][1]['editor']);self.assertIn('print(1)',asked[0][1]['argv'][1]);self.assertTrue(sent['editor_ok'])
         asked,sent,result,_=run('Code','desktop_type',{'text':'rm -rf x'},False,auto=False,target='vscode');self.assertIsNone(sent);self.assertFalse(result['acted']);self.assertIn('onaylanmadı',result['error'])
+        # opening a web page leaves this Mac, so it asks every time, even in an auto session, and a refusal stops it
+        asked,sent,result,_=run('Notes','desktop_open_url',{'url':'https://example.com/x'},True)
+        self.assertEqual(len(asked),1);self.assertIn('example.com',asked[0][1]['argv'][1]);self.assertTrue(result['acted'])
+        asked,sent,result,_=run('Notes','desktop_open_url',{'url':'https://example.com/steal'},False)
+        self.assertEqual(len(asked),1);self.assertIsNone(sent);self.assertFalse(result['acted'])
+        # an ordinary click in the same auto session still runs without a card
+        asked,_,_,_=run('Notes','desktop_click',{'x':5,'y':5},True);self.assertEqual(asked,[])
         # clicking in an editor, typing elsewhere, and a stale or unknown front app need no editor flag
         asked,sent,_,_=run('Code','desktop_click',{'x':10,'y':10},True,target='vscode');self.assertEqual(asked,[]);self.assertNotIn('editor_ok',sent);self.assertEqual(sent['target_bundle'],'com.microsoft.VSCode')
         asked,sent,_,_=run('Notes','desktop_type',{'text':'merhaba'},True);self.assertEqual(asked,[]);self.assertNotIn('editor_ok',sent)

@@ -53,8 +53,9 @@ class DesktopBridge:
         if tool in ACTIONS and not session.get('target'):raise ValueError('Önce çalışacağın uygulamayı seç: desktop_open_app veya desktop_observe(app=…). Eylemler Berke’nin ön plandaki uygulamasına değil, seçtiğin uygulamaya arka planda gider.')
         if tool not in ('desktop_observe','desktop_open_url','desktop_open_app') and time.time()-session.get('observed_at',0)>30:raise ValueError('Eylemden önce güncel ekranı gözlemle.')  # opening an app in the background needs no look first (and a look at an app needs it open)
         editor=tool in ('desktop_type','desktop_key') and (is_editor(session.get('target')) or is_editor(session.get('front')) or is_editor(session.get('front_bundle')))  # the app the agent works in
-        if tool!='desktop_observe' and not session.get('auto_actions'):
-            payload={'reason':('Kod düzenleyiciye yazma ('+str(session.get('front'))+'): ' if editor else 'Bilgisayar eylemi: ')+tool,'argv':[tool,json.dumps(args,ensure_ascii=False)]}
+        # desktop_open_url is the one action that leaves this Mac, so it always asks — even in an auto session.
+        if tool!='desktop_observe' and (tool=='desktop_open_url' or not session.get('auto_actions')):
+            payload={'reason':('Ağda sayfa açma: ' if tool=='desktop_open_url' else 'Kod düzenleyiciye yazma ('+str(session.get('front'))+'): ' if editor else 'Bilgisayar eylemi: ')+tool,'argv':[tool,json.dumps(args,ensure_ascii=False)]}
             if editor:payload['editor']=True
             if not self.approve('desktop',payload):return {'acted':False,'error':'Kod düzenleyiciye yazma onaylanmadı.' if editor else 'Bilgisayar eylemi onaylanmadı.'}
         if tool!='desktop_observe' and (self.store.desktop_session is not session or self.cancelled.is_set()):raise ValueError('Kontrol durduruldu.')

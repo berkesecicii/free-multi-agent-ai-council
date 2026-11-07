@@ -1,3 +1,6 @@
+## 2026-11-06 · desktop_open_url artık her zaman soruyor
+- Güvenlik incelemesinde bulundu: bilgisayar kontrol oturumu "otomatik" modda açıldığında `desktop_open_url` de tıklama/yazma gibi sormadan çalışıyordu. Bu, bu Mac'ten dışarı çıkan tek eylem: zehirlenmiş bir ajan 2000 karaktere kadar bir adrese Berke'nin kendi tarayıcısında sessizce gidebilirdi. Artık otomatik oturumda bile her seferinde onay kartı çıkıyor; tıklama ve yazma eskisi gibi sormuyor. Testle korundu. 294 test.
+
 ## 2026-11-04 · Komut ortamı (sandbox) sertleştirildi
 - `project_command` kum havuzu artık ajanların kendi giriş klasörlerini (`~/.claude`, `~/.codex`, `~/.gemini`), tarayıcı ve mesaj verisini (Chrome, Safari, Cookies, Messages, Mail), kabuk geçmişini ve (git komutları dışında) Keychain ile token dosyalarını okutmaz. Gerçek Mac'te `sandbox-exec` ile denendi: bu yollar `Operation not permitted` verdi; proje dosyası okuma, python3 ve geçici klasöre yazma çalıştı; ev klasörüne yazma yine engelli. 294 test.
 
