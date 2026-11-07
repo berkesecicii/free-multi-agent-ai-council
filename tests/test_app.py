@@ -1163,7 +1163,7 @@ class CostDefaultsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             s=Store(tmp);chats=[c['id'] for c in s.state['chats']];s.save()
             again=Store(tmp)
-            self.assertEqual(again.state['version'],'0.7.6')
+            self.assertEqual(again.state['version'],'0.7.7')
             self.assertEqual([c['id'] for c in again.state['chats']],chats)
     def test_live_research_steps_up_once_and_plain_chat_stays_cheap(self):
         from unittest.mock import patch

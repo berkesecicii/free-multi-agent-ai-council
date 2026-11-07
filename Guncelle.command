@@ -64,7 +64,7 @@ rm -rf "$LIVE"
 mv "$LIVE.new" "$LIVE"
 
 print "4/4  Doğrulama"
-grep -q "0.7.6" "$APP/Contents/Info.plist"
+grep -q "0.7.7" "$APP/Contents/Info.plist"
 for f in app.py chat_workflow.py scheduler.py documents.py claude_usage.py google_chat.py model_catalog.py free_chat.py team_runner.py local_chat.py static/focus.js static/i18n.js static/clarity.js static/attach.js static/pulse.js static/polish.js static/rail.js static/sidebar.js static/native.js static/index.html static/focus.css; do
   cmp -s "$f" "$LIVE/$f" || { print "HATA: $f server-live içine kopyalanmamış"; exit 1; }
 done
@@ -77,5 +77,5 @@ if [ "$MODE" = "TAM" ]; then
   fi
   print "$NEW_STAMP" > "$STAMP_FILE"
 fi
-print "Tamam ($MODE): JARVIS 0.7.6 hazır. Açılıyor..."
+print "Tamam ($MODE): JARVIS 0.7.7 hazır. Açılıyor..."
 open "$APP"

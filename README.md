@@ -8,8 +8,8 @@
 One chat orchestrates **Claude Code**, **Codex** and **Gemini** agents as a council, and they can drive your Mac in the background.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-black?logo=apple)
-![Version](https://img.shields.io/badge/version-0.7.6-4cc9f0)
-![Tests](https://img.shields.io/badge/tests-293%20passing-2ea44f)
+![Version](https://img.shields.io/badge/version-0.7.7-4cc9f0)
+![Tests](https://img.shields.io/badge/tests-294%20passing-2ea44f)
 ![Python](https://img.shields.io/badge/python-stdlib%20only-3776ab?logo=python&logoColor=white)
 ![Swift](https://img.shields.io/badge/native%20shell-Swift-F05138?logo=swift&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -255,7 +255,8 @@ Every release is its own commit and tag, and the code in each tag is the real sn
 
 | Version | Highlights |
 |---|---|
-| **v0.7.6** | Background computer control with agent screen, edge glow and agent cursor · persistent local code signing · brief-based handoff · all research in EDITH · project tools (patch, search, notebook, sandboxed commands, skills, headless browser) · parallel team steps · scheduled tasks and bell · activity panel · per-agent voices · honest quota display · 293 tests |
+| **v0.7.7** | Security pass: the sandbox behind `project_command` no longer exposes the agents' own sign-in folders, browser and message data or shell history, and opening a web page during computer control asks every time, even in an auto session · 294 tests |
+| v0.7.6 | Background computer control with agent screen, edge glow and agent cursor · persistent local code signing · brief-based handoff · all research in EDITH · project tools (patch, search, notebook, sandboxed commands, skills, headless browser) · parallel team steps · scheduled tasks and bell · activity panel · per-agent voices · honest quota display · 293 tests |
 | v0.7.5 | Image thumbnails and zoom · safe chat-scoped document upload with local PDFKit/OCR · three basic tools plus a collapsible advanced section |
 | **v0.7.4** | Permission levels incl. *Full access · Turbo* · "always allow in this chat" · Mac-permission status · photo and video attachments · coordinator-led image reading · working-agents bubble |
 | v0.7.3 | Simple code requests go straight to a coding agent · effort grading (`low/medium/high`) · a team charter in every prompt |
