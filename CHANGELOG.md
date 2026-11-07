@@ -1,3 +1,9 @@
+# 0.7.8 — sandbox: sohbetler açık, token'lar kapalı (2026-11-06)
+
+- 0.7.7'de `~/.claude`, `~/.codex`, `~/.gemini` klasörlerinin tamamı kapatılmıştı; bu Berke'nin istediği bir şeyi de kapatıyordu: ajanların diğer AI araçlarındaki sohbetleri okuyup üzerinde çalışmasını. Artık klasörler açık, yalnız giriş dosyaları kapalı: `.codex/auth.json`, `.codex/config.toml`, `.gemini/oauth_creds.json`, `.gemini/antigravity-cli/antigravity-oauth-token`, `.claude/.credentials.json`, artı ileride eklenebilecek giriş dosyaları için bir desen (sohbet dosyaları `.jsonl`/`.sqlite` olduğu için desene takılmıyor). macOS'ta Claude Code token'ı zaten diskte değil, Keychain'de.
+- `project_command` artık her ajanda aynı kum havuzundan geçiyor: Codex istemcisinin kendi `workspaceWrite` profili yazmayı sınırlıyor ama okumayı sınırlamıyordu, o yüzden komutlar her zaman kendi `sandbox-exec` profilimizle çalışıyor.
+- Gerçek Mac'te denendi: altı token/özel yol kapalı (`Operation not permitted`), altı sohbet yolu açık, proje okuma/`python3`/geçici yazma çalışıyor, ev klasörüne yazma hala engelli. 294 test.
+
 # 0.7.7 — güvenlik turu (2026-11-06)
 
 ## 2026-11-06 · desktop_open_url artık her zaman soruyor

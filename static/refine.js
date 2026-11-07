@@ -50,7 +50,7 @@ const refineRender=renderWorkspace;let refinedChatSignature='';renderWorkspace=f
  const job=state.model_job;$('#modelConnection').textContent=job?job.model+' · '+tr('yanıtlıyor','replying'):$('#modelConnection').textContent;
 };
 window.addEventListener('jarvis-ready',()=>safe(async()=>{await api('connection-status');await api('model-catalog');}));
-$('#settings>.panel-head>.pill').textContent='v0.7.7';
+$('#settings>.panel-head>.pill').textContent='v0.7.8';
 
 if($('#engineMode').querySelector('option[value=local]'))$('#engineMode').querySelector('option[value=local]').textContent=tr('Bu Mac · isteğe bağlı','This Mac · optional');
 

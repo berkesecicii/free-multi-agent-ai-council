@@ -746,15 +746,17 @@ class ProjectToolsTests(unittest.TestCase):
         self.bridge.approve=approve
         with self.assertRaises(ValueError):self.bridge.invoke({'tool':'project_edit','arguments':{'path':'hello.txt','content':'after','reason':'Test'}})
         self.assertEqual(target.read_text(),'someone else')
-    def test_commands_require_approval_and_use_workspace_network_restriction(self):
+    def test_commands_require_approval_and_always_run_in_our_own_sandbox(self):
         from unittest.mock import MagicMock
         self.bridge.client=MagicMock();args={'tool':'project_command','arguments':{'argv':['python3','-c','print(123)'],'reason':'Test'}}
         self.assertFalse(self.bridge.invoke(args)['ran']);self.bridge.client.rpc.assert_not_called()
-        self.bridge.approve=lambda *args:True;self.bridge.client.rpc.return_value={'exitCode':0,'stdout':'123'}
+        self.bridge.approve=lambda *args:True
+        self.bridge.local_exec=MagicMock(return_value={'exitCode':0,'output':'123'})
         self.assertTrue(self.bridge.invoke(args)['ran'])
-        params=self.bridge.client.rpc.call_args.args[1]
-        self.assertEqual(params['cwd'],str(self.root.resolve()));self.assertFalse(params['sandboxPolicy']['networkAccess'])
-        self.assertEqual(params['sandboxPolicy']['writableRoots'],[str(self.root.resolve())])
+        # the Codex client's own workspaceWrite sandbox limits writes but not reads, so commands never go through it
+        self.bridge.client.rpc.assert_not_called()
+        argv,seconds,network,git=self.bridge.local_exec.call_args.args
+        self.assertEqual(argv,['python3','-c','print(123)']);self.assertFalse(network);self.assertFalse(git)
 
 
 class PermissionAndContextTests(unittest.TestCase):
@@ -1163,7 +1165,7 @@ class CostDefaultsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             s=Store(tmp);chats=[c['id'] for c in s.state['chats']];s.save()
             again=Store(tmp)
-            self.assertEqual(again.state['version'],'0.7.7')
+            self.assertEqual(again.state['version'],'0.7.8')
             self.assertEqual([c['id'] for c in again.state['chats']],chats)
     def test_live_research_steps_up_once_and_plain_chat_stays_cheap(self):
         from unittest.mock import patch

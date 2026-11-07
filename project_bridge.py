@@ -72,10 +72,15 @@ class ProjectBridge:
         # macOS sandbox-exec profile: no network, writes only inside the project and temp folders, no reading of key and app-data folders.
         root=str(self.root);home=str(Path.home())
         if any(ch in root+home for ch in '"\\'):raise ValueError('Proje yolu komut ortamı için uygun değil.')
-        # Always unreadable: key folders, the agents' own sign-in folders, browser/message data and shell history. Without git: also the Keychain and token files (git needs them for its saved sign-in).
-        always=('.ssh','.aws','.gnupg','.codex','.claude','.gemini','.antigravity','Library/Application Support/BerkeJARVIS','Library/Application Support/Claude','Library/Application Support/Google/Chrome','Library/Safari','Library/Cookies','Library/Messages','Library/Mail')
-        blocked=' '.join('(subpath "%s/%s")'%(home,part) for part in always+(() if git else ('Library/Keychains','.config/gh','.config/gcloud')))
-        blocked+=' '+' '.join('(literal "%s/%s")'%(home,name) for name in ('.zsh_history','.bash_history')+(() if git else ('.netrc','.git-credentials')))
+        # The other AI tools' chat logs (~/.claude, ~/.codex, ~/.gemini) stay readable on purpose, so an agent can pick up
+        # a conversation from another tool. Only their sign-in files are closed, plus key folders, browser/message data
+        # and shell history. Without git: also the Keychain and token files (git needs them for its saved sign-in).
+        trees=('.ssh','.aws','.gnupg','Library/Application Support/BerkeJARVIS','Library/Application Support/Claude','Library/Application Support/Google/Chrome','Library/Safari','Library/Cookies','Library/Messages','Library/Mail')+(() if git else ('Library/Keychains','.config/gh','.config/gcloud'))
+        files=('.codex/auth.json','.codex/config.toml','.gemini/oauth_creds.json','.gemini/antigravity-cli/antigravity-oauth-token','.claude/.credentials.json','.zsh_history','.bash_history')+(() if git else ('.netrc','.git-credentials'))
+        blocked=' '.join('(subpath "%s/%s")'%(home,part) for part in trees)
+        blocked+=' '+' '.join('(literal "%s/%s")'%(home,name) for name in files)
+        # Any further sign-in file those CLIs add later; their .jsonl/.sqlite chat logs are not matched and stay readable.
+        blocked+=' (regex #"^'+home+'/\\.(codex|gemini|claude)/.*(auth|oauth|credential|token|secret)[^/]*\\.(json|toml|yaml|yml|txt|key|pem)$")'
         return ('(version 1)(allow default)'+('' if network else '(deny network*)')+'(deny mach-lookup (global-name "com.apple.coreservices.appleevents"))(deny file-read* '+blocked+')'
             '(deny file-write* (require-not (require-any (subpath "'+root+'") (subpath "/private/tmp") (subpath "/private/var/folders") (regex #"^/dev/(null|tty|zero|dtracehelper)$"))))')
     def local_exec(self,argv,timeout=30,network=False,git=False):
@@ -248,8 +253,9 @@ class ProjectBridge:
             if self.cancelled.is_set():raise ValueError('İş durduruldu.')
             seconds=args.get('timeout_seconds') if isinstance(args.get('timeout_seconds'),int) and not isinstance(args.get('timeout_seconds'),bool) else 30
             seconds=max(5,min(120,seconds))
-            if self.client is None:result=self.local_exec(argv,seconds,network,git_direct)
-            else:result=self.client.rpc('command/exec',{'command':argv,'cwd':str(self.root),'timeoutMs':seconds*1000,'outputBytesCap':18000,'sandboxPolicy':{'type':'workspaceWrite','writableRoots':[str(self.root)],'networkAccess':network}},timeout=seconds+10)
+            # Every agent gets the same fence: the Codex client's own 'workspaceWrite' sandbox limits writes but not reads,
+            # so commands always go through our sandbox-exec profile instead, whoever asked for them.
+            result=self.local_exec(argv,seconds,network,git_direct)
             self.runs.append(result.get('exitCode') if isinstance(result,dict) else None)
             self.activity('command_result',str(result)[:1200])
             return {'ran':True,'result':result}

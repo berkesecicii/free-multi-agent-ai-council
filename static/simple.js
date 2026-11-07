@@ -1,9 +1,9 @@
 'use strict';
 // One conversation, contextual tools, optional project pane. No separate memory/screen/approval destinations.
 document.querySelectorAll('.rail-btn[data-view="memory"],.rail-btn[data-view="screen"],.rail-btn[data-view="approvals"]').forEach(b=>b.remove());
-$('.page-heading .eyebrow').innerHTML='BERKE’S WORKSPACE <span>/</span> <b id="buildBadge">v0.7.7</b>';
+$('.page-heading .eyebrow').innerHTML='BERKE’S WORKSPACE <span>/</span> <b id="buildBadge">v0.7.8</b>';
 $('#pageTitle').textContent='Merhaba Berke.';$('#pageSubtitle').textContent='Bir sohbet. Bütün ekip.';
-$('.page-footer').innerHTML='<span>JARVIS <b>MARK IV · v0.7.7</b></span><span>MAC · LOCAL FIRST</span>';
+$('.page-footer').innerHTML='<span>JARVIS <b>MARK IV · v0.7.8</b></span><span>MAC · LOCAL FIRST</span>';
 $('.memory-mini').classList.add('hidden');
 const railLabels={mission:['Sohbet','◌'],project:['Proje','⌥'],settings:['Ayarlar','⚙']};
 document.querySelectorAll('.rail-btn').forEach(b=>{const [label,icon]=railLabels[b.dataset.view];b.innerHTML='<span>'+icon+'</span><small>'+label+'</small>';b.setAttribute('aria-label',label);});

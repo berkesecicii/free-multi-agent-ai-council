@@ -221,12 +221,25 @@ class SearchNoteCommandTests(BridgeCase):
         plain=self.bridge.sandbox_profile(network=True);git=self.bridge.sandbox_profile(network=True,git=True)
         self.assertIn('Library/Keychains',plain);self.assertNotIn('Library/Keychains',git)
         for part in ('.ssh','.aws','.gnupg','BerkeJARVIS'):self.assertIn(part,git)
-    def test_sandbox_hides_agent_sign_in_browser_and_history_files(self):
+    def test_sandbox_hides_sign_in_files_but_leaves_the_other_tools_chats_readable(self):
+        import re as _re
         plain=self.bridge.sandbox_profile();git=self.bridge.sandbox_profile(network=True,git=True)
+        home=str(Path.home())
         for profile in (plain,git):
-            for part in ('/.codex','/.claude','/.gemini','Library/Safari','Library/Cookies','Library/Application Support/Google/Chrome','Library/Messages','.zsh_history','.bash_history'):self.assertIn(part,profile,part)
+            # the sign-in files of the other AI CLIs, and data that is not a chat log
+            for part in ('.codex/auth.json','.codex/config.toml','.gemini/oauth_creds.json','antigravity-oauth-token','.claude/.credentials.json','Library/Safari','Library/Cookies','Library/Application Support/Google/Chrome','Library/Messages','.zsh_history','.bash_history'):
+                self.assertIn(part,profile,part)
+            # ...while the folders themselves are NOT shut, so chat logs stay readable
+            for tree in ('.codex','.claude','.gemini'):
+                self.assertNotIn('(subpath "%s/%s")'%(home,tree),profile,tree)
         for part in ('.netrc','.git-credentials','.config/gh','.config/gcloud','Library/Keychains'):
             self.assertIn(part,plain,part);self.assertNotIn(part,git,part)
+        # the catch-all for future sign-in files matches config-style names only, never a .jsonl/.sqlite transcript
+        pattern=_re.search(r'\(regex #"([^"]+)"\)',plain).group(1)
+        for secret in ('/.codex/auth.json','/.gemini/oauth_creds.json','/.codex/sub/my-token.toml'):
+            self.assertTrue(_re.search(pattern,home+secret),secret)
+        for chat in ('/.codex/sessions/2026/rollout-auth-talk.jsonl','/.claude/projects/x/abc.jsonl','/.codex/thread_history_1.sqlite','/.claude/history.jsonl'):
+            self.assertIsNone(_re.search(pattern,home+chat),chat)
     def test_sandbox_profile_blocks_network_writes_outside_and_secret_folders(self):
         profile=self.bridge.sandbox_profile()
         self.assertIn('(deny network*)',profile);self.assertNotIn('(deny network*)',self.bridge.sandbox_profile(network=True));self.assertIn('com.apple.coreservices.appleevents',profile);self.assertIn(str(self.root),profile);self.assertIn('.ssh',profile);self.assertIn('BerkeJARVIS',profile);self.assertIn('(deny file-write*',profile)

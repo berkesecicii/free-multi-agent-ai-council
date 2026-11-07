@@ -50,7 +50,7 @@ cat > "$OUTPUT_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>JARVIS</string>
 <key>CFBundleDisplayName</key><string>JARVIS</string>
 <key>CFBundleVersion</key><string>76</string>
-<key>CFBundleShortVersionString</key><string>0.7.7</string>
+<key>CFBundleShortVersionString</key><string>0.7.8</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>

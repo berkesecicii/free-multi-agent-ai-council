@@ -128,14 +128,14 @@ class Store:
             if row['status']=='pending' and time.time()>row.get('expires',0):row['status']='expired'
         for row in self.state['tasks']:
             if row.get('status')=='cancelled' and ('Önceki planlayıcı' in row.get('checkpoint','') or 'Duydun mu' in row.get('title','')):row['archived']=True
-        if self.path.exists() and self.state.get('version') not in (None,'0.4.0','0.5.0','0.6.0','0.6.1','0.7.0','0.7.1','0.7.2','0.7.3','0.7.4','0.7.5','0.7.6','0.7.7'):
+        if self.path.exists() and self.state.get('version') not in (None,'0.4.0','0.5.0','0.6.0','0.6.1','0.7.0','0.7.1','0.7.2','0.7.3','0.7.4','0.7.5','0.7.6','0.7.7','0.7.8'):
             # One-time clean landing; preserve all earlier records in chat history.
             for c in self.state['chats']:
                 if c['id']=='main':c['title']='Önceki sohbet'
             fresh=dict(id=ident(),title='Yeni sohbet',created_at=stamp(),project_brief='',active_project='')
             self.state['chats'].insert(0,fresh);self.state['active_chat']=fresh['id']
             self.state['project_brief']='';self.state['active_project']=''
-        self.state['version']='0.7.7'
+        self.state['version']='0.7.8'
         from documents import Attachments
         self.attachments=Attachments(self.directory,RES/'pdftext')
         self.attachments.cleanup(self.state['messages'])

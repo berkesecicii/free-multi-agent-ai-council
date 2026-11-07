@@ -8,7 +8,7 @@
 One chat orchestrates **Claude Code**, **Codex** and **Gemini** agents as a council, and they can drive your Mac in the background.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-black?logo=apple)
-![Version](https://img.shields.io/badge/version-0.7.7-4cc9f0)
+![Version](https://img.shields.io/badge/version-0.7.8-4cc9f0)
 ![Tests](https://img.shields.io/badge/tests-294%20passing-2ea44f)
 ![Python](https://img.shields.io/badge/python-stdlib%20only-3776ab?logo=python&logoColor=white)
 ![Swift](https://img.shields.io/badge/native%20shell-Swift-F05138?logo=swift&logoColor=white)
@@ -132,7 +132,7 @@ VISION and FRIDAY work on a folder you connect, with tools that are sandboxed an
 | `project_patch` | Small, single-hunk patches instead of rewriting files (with approval and backups) |
 | `project_search` | Text search inside the project |
 | `project_note` | A shared project notebook (and a persistent *team* memory, injected into each agent's prompt, capped at 1,200 characters) |
-| `project_command` | Approved commands (tests, `sh`/`bash`/`zsh`, `curl`, `pip`, `find`, `sed`, `awk`, `tar`, `diff`…) inside a **macOS sandbox**: writes only to the project and a temp folder, key folders, the agents' own sign-in folders (`.claude`, `.codex`, `.gemini`), browser and message data, shell history and JARVIS's own data are unreadable, Apple Events are off |
+| `project_command` | Approved commands (tests, `sh`/`bash`/`zsh`, `curl`, `pip`, `find`, `sed`, `awk`, `tar`, `diff`…) inside a **macOS sandbox**, the same one for every agent: writes only to the project and a temp folder; key folders, the other AI CLIs' **sign-in files**, browser and message data, shell history and JARVIS's own data are unreadable, Apple Events are off. Those CLIs' **chat logs stay readable** (`~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/history`), so an agent can pick up a conversation you had in another tool |
 | `project_skill` | Team playbooks (`web-game`, `project-setup`, `verify`, `debug`, `git-flow`) plus your own Markdown playbooks |
 | `project_browser` | Runs a page the agent just wrote in a **real headless Chromium** (press keys, click, read text/numbers/JS) with the network off |
 
@@ -255,7 +255,8 @@ Every release is its own commit and tag, and the code in each tag is the real sn
 
 | Version | Highlights |
 |---|---|
-| **v0.7.7** | Security pass: the sandbox behind `project_command` no longer exposes the agents' own sign-in folders, browser and message data or shell history, and opening a web page during computer control asks every time, even in an auto session · 294 tests |
+| **v0.7.8** | The command sandbox is now the same for every agent, and it blocks the other AI CLIs' sign-in files instead of their whole folders — so agents can read the chats you had in Claude Code, Codex or Gemini and work on them, while the tokens stay closed · 294 tests |
+| v0.7.7 | Security pass: the sandbox behind `project_command` no longer exposes the agents' own sign-in folders, browser and message data or shell history, and opening a web page during computer control asks every time, even in an auto session · 294 tests |
 | v0.7.6 | Background computer control with agent screen, edge glow and agent cursor · persistent local code signing · brief-based handoff · all research in EDITH · project tools (patch, search, notebook, sandboxed commands, skills, headless browser) · parallel team steps · scheduled tasks and bell · activity panel · per-agent voices · honest quota display · 293 tests |
 | v0.7.5 | Image thumbnails and zoom · safe chat-scoped document upload with local PDFKit/OCR · three basic tools plus a collapsible advanced section |
 | **v0.7.4** | Permission levels incl. *Full access · Turbo* · "always allow in this chat" · Mac-permission status · photo and video attachments · coordinator-led image reading · working-agents bubble |
