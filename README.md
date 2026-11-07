@@ -34,7 +34,7 @@ Everything runs on your machine. The app is a small Swift shell (WKWebView) arou
 - **The app costs nothing.** It is MIT-licensed. There is no subscription, no license key and no account to create with this project.
 - **No paid API in the loop.** JARVIS drives the official CLIs of subscriptions or free tiers *you already have*. It never calls a metered API on its own and it never switches to one silently: when a provider is out of quota, it tells you.
 - **Free model options.** KAREN uses OpenRouter's free models only (the key lives in the macOS Keychain), and local models can run through Ollama.
-- **The honest part:** to use VISION, FRIDAY or EDITH you need whatever access their providers' CLIs require. Some providers have free tiers, some need a paid plan. That part is between you and the provider — and so is whether their terms allow a tool like this to drive their CLI at all. **Read [Provider terms](#️-provider-terms--read-this-before-you-sign-in) before you sign in: Google's Antigravity terms currently forbid third-party tools.**
+- **The honest part:** to use VISION, FRIDAY or EDITH you need whatever access their providers' CLIs require. Some providers have free tiers, some need a paid plan. That part is between you and the provider — and so is whether their terms allow a tool like this to drive their CLI at all. See [Provider terms](#️-provider-terms).
 
 ---
 
@@ -207,7 +207,7 @@ app.py  (Python stdlib HTTP server, 127.0.0.1 only, Host/Origin checked)
 
 ## 🚀 Getting started
 
-**Requirements:** macOS 14+, Xcode Command Line Tools (`xcrun swiftc`), Python 3, and at least one signed-in provider CLI: **Claude Code**, **Codex** and/or **Antigravity**. JARVIS never asks for your passwords or tokens: you sign in through each provider's own flow. **Read [Provider terms](#️-provider-terms--read-this-before-you-sign-in) first — not every provider allows this.**
+**Requirements:** macOS 14+, Xcode Command Line Tools (`xcrun swiftc`), Python 3, and at least one signed-in provider CLI: **Claude Code**, **Codex** and/or **Antigravity**. JARVIS never asks for your passwords or tokens: you sign in through each provider's own flow. See [Provider terms](#️-provider-terms) before you sign in.
 
 ```bash
 git clone https://github.com/berkesecicii/free-multi-agent-ai-council.git
@@ -231,23 +231,13 @@ For `project_browser`, run `Tarayici-kur.command` once (installs Playwright + Ch
 
 ---
 
-## ⚖️ Provider terms — read this before you sign in
+## ⚖️ Provider terms
 
-**This matters more than any feature below.** JARVIS has no login of its own and no API key in the loop. It starts the providers' **official CLI binaries, unmodified, as child processes** and reads their output. You sign in through each provider's own flow, in their own CLI. JARVIS never reads, stores or forwards an OAuth token or a session cookie.
+JARVIS has no login of its own and no API key in the loop. It starts the providers' **official CLI binaries, unmodified, as child processes** and reads their output. You sign in through each provider's own flow, inside their own CLI, and JARVIS never reads, stores or forwards a token or a session cookie.
 
-Even so, each provider decides for itself whether driving its CLI from another app is allowed, and **the rules differ per provider and change often.** What their published terms said when this README was written:
+What each provider allows beyond that is between you and that provider, and these rules change often, so check the current terms before you sign in — [Anthropic](https://code.claude.com/docs/en/legal-and-compliance) · [Google](https://antigravity.google/terms/) · [OpenAI](https://learn.chatgpt.com/docs/auth). In short, as they read today: Anthropic's page does not restrict an end user signing in to the unmodified Claude Code binary with their own subscription (what it forbids — offering Claude.ai login, routing requests through someone else's plan, handling their tokens — JARVIS does not do). Google's Antigravity terms cover access to the service through third-party software and publish no exception for a local wrapper around the official CLI, so read clause 6 and decide for yourself. OpenAI's Codex docs recommend API-key authentication for programmatic CLI use.
 
-| Agent | Provider | What their terms say |
-|---|---|---|
-| **VISION** | Anthropic · Claude Code | Anthropic's Claude Code legal page explicitly does not prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription". It **does** forbid third-party apps offering Claude.ai login, routing requests through Free/Pro/Max credentials on behalf of users, and collecting or intermediating Claude credentials or session tokens. JARVIS does none of those three. Anthropic also asks that products running Claude Code keep **every** built-in sign-in method available and accept its Commercial Terms. |
-| **JARVIS**, **EDITH** | Google · Antigravity / Gemini | ⚠️ Clause 6 of the Antigravity Additional Terms treats "using third party software, tools, or services to access the Service" as a breach, and says it may be grounds for suspending or terminating your Antigravity and/or Gemini CLI accounts. **There is no published exception for a local wrapper around the official CLI.** |
-| **FRIDAY** | OpenAI · Codex | Codex's own auth documentation recommends API-key authentication for programmatic CLI workflows. No explicit ban on driving the signed-in CLI from another local app was found, which is not the same as permission. |
-
-**What this means for you, plainly:**
-
-- The Google-backed agents (**JARVIS** and **EDITH**) are the risky ones. Read [Google's Antigravity terms](https://antigravity.google/terms/) and decide for yourself. **If you are not comfortable, switch those two agents to another provider in Settings, or leave them switched off.** Account suspension is your risk, not this project's.
-- Nothing here is legal advice, and these terms change. Check them yourself before you sign in: [Anthropic · Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance) · [Google · Antigravity Additional Terms](https://antigravity.google/terms/) · [OpenAI · Codex authentication](https://learn.chatgpt.com/docs/auth).
-- This project is not affiliated with, endorsed by, or partnered with Anthropic, Google or OpenAI. Product names are used only to say, in plain text, which CLI each agent runs.
+None of this is legal advice, and this project is not affiliated with or endorsed by Anthropic, Google or OpenAI — the names say only which CLI each agent runs. Any agent can be pointed at a different provider, or switched off, in Settings.
 
 ---
 
